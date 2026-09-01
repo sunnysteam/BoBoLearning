@@ -1,0 +1,4 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 仅调试构建允许访问局域网 HTTP 服务，正式构建默认使用 HTTPS。 -->
+    <application android:usesCleartextTraffic="true"/>
+</manifest>

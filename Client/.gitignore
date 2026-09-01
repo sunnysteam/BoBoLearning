@@ -1,0 +1,17 @@
+
+# Flutter 与 Dart 生成目录
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub/
+build/
+
+# 编辑器与系统文件
+.idea/
+*.iml
+.DS_Store
+Thumbs.db
+
+# FVM 版本缓存
+.fvm/

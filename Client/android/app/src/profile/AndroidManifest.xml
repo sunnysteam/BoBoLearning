@@ -1,0 +1,4 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Profile 构建需要联网，以便 Flutter 工具连接运行中的应用。 -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+</manifest>
