@@ -26,11 +26,8 @@ class FolderPage extends StatelessWidget {
       initialIndex: index,
       controllerFactory: playbackControllerFactory,
     );
-    await Navigator.of(context).push<void>(
-      MaterialPageRoute<void>(
-        builder: (_) => PlayerPage(viewModel: viewModel),
-      ),
-    );
+    await Navigator.of(context)
+        .push<void>(MaterialPageRoute<void>(builder: (_) => PlayerPage(viewModel: viewModel)));
   }
 
   @override
@@ -54,10 +51,7 @@ class FolderPage extends StatelessWidget {
                   SliverPadding(
                     padding: EdgeInsets.fromLTRB(sidePadding, 20, sidePadding, 24),
                     sliver: SliverToBoxAdapter(
-                      child: _FolderPageHeader(
-                        folderName: folderName,
-                        count: items.length,
-                      ),
+                      child: _FolderPageHeader(folderName: folderName, count: items.length),
                     ),
                   ),
                   SliverPadding(
@@ -99,55 +93,90 @@ class _FolderPageHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.center,
-      children: [
-        IconButton.filledTonal(
-          key: const Key('文件夹详情返回按钮'),
-          tooltip: '返回首页',
-          onPressed: () => Navigator.of(context).pop(),
-          style: IconButton.styleFrom(
-            backgroundColor: AppColors.paper.withValues(alpha: 0.92),
-            foregroundColor: AppColors.tealDark,
-            side: BorderSide(color: AppColors.teal.withValues(alpha: 0.16)),
-          ),
-          icon: const Icon(Icons.arrow_back_rounded),
-        ),
-        const SizedBox(width: 14),
-        DecoratedBox(
-          decoration: BoxDecoration(
-            color: AppColors.teal.withValues(alpha: 0.12),
-            borderRadius: BorderRadius.circular(16),
-          ),
-          child: const SizedBox.square(
-            dimension: 50,
-            child: Icon(Icons.folder_open_rounded, color: AppColors.tealDark, size: 29),
-          ),
-        ),
-        const SizedBox(width: 14),
-        Expanded(
-          child: Column(
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth < 600) {
+          return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              Row(
+                children: [
+                  _buildBackButton(context),
+                  const SizedBox(width: 14),
+                  _buildFolderIcon(),
+                ],
+              ),
+              const SizedBox(height: 14),
               Text(
                 folderName,
                 key: const Key('文件夹详情标题'),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.headlineMedium,
+                style: Theme.of(context).textTheme.headlineSmall,
               ),
-              const SizedBox(height: 3),
-              Text(
-                '$count 个视频 · 选一个开始探索吧',
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: AppColors.mutedInk,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
+              const SizedBox(height: 4),
+              _buildDescription(context),
             ],
-          ),
-        ),
-      ],
+          );
+        }
+
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            _buildBackButton(context),
+            const SizedBox(width: 14),
+            _buildFolderIcon(),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    folderName,
+                    key: const Key('文件夹详情标题'),
+                    style: Theme.of(context).textTheme.headlineMedium,
+                  ),
+                  const SizedBox(height: 3),
+                  _buildDescription(context),
+                ],
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildBackButton(BuildContext context) {
+    return IconButton.filledTonal(
+      key: const Key('文件夹详情返回按钮'),
+      tooltip: '返回首页',
+      onPressed: () => Navigator.of(context).pop(),
+      style: IconButton.styleFrom(
+        backgroundColor: AppColors.paper.withValues(alpha: 0.92),
+        foregroundColor: AppColors.tealDark,
+        side: BorderSide(color: AppColors.teal.withValues(alpha: 0.16)),
+      ),
+      icon: const Icon(Icons.arrow_back_rounded),
+    );
+  }
+
+  Widget _buildFolderIcon() {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: AppColors.teal.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: const SizedBox.square(
+        dimension: 50,
+        child: Icon(Icons.folder_open_rounded, color: AppColors.tealDark, size: 29),
+      ),
+    );
+  }
+
+  Widget _buildDescription(BuildContext context) {
+    return Text(
+      '$count 个视频 · 选一个开始探索吧',
+      style: Theme.of(context).textTheme.bodyMedium
+          ?.copyWith(color: AppColors.mutedInk, fontWeight: FontWeight.w600),
     );
   }
 }

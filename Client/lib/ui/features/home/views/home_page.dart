@@ -1,4 +1,3 @@
-import 'package:bobo_learning/domain/models/video_item.dart';
 import 'package:bobo_learning/ui/core/app_theme.dart';
 import 'package:bobo_learning/ui/core/playful_backdrop.dart';
 import 'package:bobo_learning/ui/features/home/view_models/home_view_model.dart';
@@ -89,6 +88,21 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _openFolder(VideoFolderGroup group) async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => FolderPage(
+          folderName: group.displayName,
+          items: group.items,
+          playbackControllerFactory: widget.playbackControllerFactory,
+        ),
+      ),
+    );
+    if (mounted) {
+      await widget.viewModel.refresh(silent: true);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -97,6 +111,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           bottom: false,
           child: LayoutBuilder(
             builder: (context, constraints) {
+              final compact = constraints.maxWidth < 600;
               final sidePadding = constraints.maxWidth > 1220
                   ? (constraints.maxWidth - 1180) / 2
                   : constraints.maxWidth >= 700
@@ -114,7 +129,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                       physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
                       slivers: [
                         SliverPadding(
-                          padding: EdgeInsets.fromLTRB(sidePadding, 24, sidePadding, 22),
+                          padding: EdgeInsets.fromLTRB(
+                            sidePadding,
+                            compact ? 20 : 24,
+                            sidePadding,
+                            compact ? 18 : 22,
+                          ),
                           sliver: SliverToBoxAdapter(
                             child: _HomeHeader(
                               videoCount: widget.viewModel.items.length,
@@ -141,7 +161,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     switch (widget.viewModel.state) {
       case HomeLoadState.initial:
       case HomeLoadState.loading:
-        return [_LoadingGrid(sidePadding: sidePadding)];
+        return [_LoadingSections(sidePadding: sidePadding)];
       case HomeLoadState.empty:
         return [const SliverFillRemaining(hasScrollBody: false, child: _EmptyState())];
       case HomeLoadState.error:
@@ -163,21 +183,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             ),
             SliverPadding(
               padding: EdgeInsets.symmetric(horizontal: sidePadding),
-              sliver: SliverGrid(
-                gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                  maxCrossAxisExtent: 270,
-                  childAspectRatio: 0.82,
-                  crossAxisSpacing: 16,
-                  mainAxisSpacing: 18,
-                ),
-                delegate: SliverChildBuilderDelegate(
-                  (context, index) => _VideoCard(
-                    key: ValueKey(group.items[index].id),
-                    video: group.items[index],
-                    colorIndex: groupIndex * 3 + index,
-                    onTap: () => _openPlayer(group, index),
-                  ),
-                  childCount: group.items.length,
+              sliver: SliverToBoxAdapter(
+                child: _FolderVideoStrip(
+                  group: group,
+                  colorOffset: groupIndex * 3,
+                  onVideoTap: (index) => _openPlayer(group, index),
+                  onViewMore: () => _openFolder(group),
                 ),
               ),
             ),
@@ -202,7 +213,8 @@ class _HomeHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final compact = constraints.maxWidth < 650;
+        final compact = constraints.maxWidth < 600;
+        final countLabel = videoCount == 0 ? '等待新故事' : '$videoCount 个快乐视频';
         final brand = Row(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -213,7 +225,7 @@ class _HomeHeader extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'BoBo Learning',
+                    '菠萝早教',
                     style: Theme.of(context).textTheme.headlineMedium
                         ?.copyWith(fontSize: compact ? 26 : 32, letterSpacing: -0.8),
                   ),
@@ -247,22 +259,13 @@ class _HomeHeader extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  videoCount == 0 ? '等待新故事' : '$videoCount 个快乐视频',
+                  countLabel,
+                  key: const Key('首页视频总数'),
                   style: Theme.of(context).textTheme.labelLarge
                       ?.copyWith(color: AppColors.tealDark),
                 ),
                 const SizedBox(width: 6),
-                IconButton(
-                  key: const Key('首页刷新按钮'),
-                  tooltip: '刷新视频',
-                  onPressed: isRefreshing ? null : onRefresh,
-                  icon: isRefreshing
-                      ? const SizedBox.square(
-                          dimension: 22,
-                          child: CircularProgressIndicator(strokeWidth: 2.5),
-                        )
-                      : const Icon(Icons.refresh_rounded),
-                ),
+                _buildRefreshButton(),
               ],
             ),
           ),
@@ -270,8 +273,49 @@ class _HomeHeader extends StatelessWidget {
 
         if (compact) {
           return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [brand, const SizedBox(height: 20), countPill],
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              brand,
+              const SizedBox(height: 14),
+              Row(
+                key: const Key('小屏顶部操作区'),
+                children: [
+                  Expanded(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: AppColors.teal.withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(18),
+                        border: Border.all(color: AppColors.teal.withValues(alpha: 0.13)),
+                      ),
+                      child: SizedBox(
+                        height: 56,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          child: Row(
+                            children: [
+                              const Icon(
+                                Icons.video_collection_rounded,
+                                color: AppColors.tealDark,
+                                size: 22,
+                              ),
+                              const SizedBox(width: 9),
+                              Text(
+                                countLabel,
+                                key: const Key('首页视频总数'),
+                                style: Theme.of(context).textTheme.labelLarge
+                                    ?.copyWith(color: AppColors.tealDark),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  _buildRefreshButton(standalone: true),
+                ],
+              ),
+            ],
           );
         }
         return Row(
@@ -285,6 +329,27 @@ class _HomeHeader extends StatelessWidget {
       },
     );
   }
+
+  Widget _buildRefreshButton({bool standalone = false}) {
+    return IconButton(
+      key: const Key('首页刷新按钮'),
+      tooltip: '刷新视频',
+      onPressed: isRefreshing ? null : onRefresh,
+      style: standalone
+          ? IconButton.styleFrom(
+              minimumSize: const Size.square(56),
+              maximumSize: const Size.square(56),
+              backgroundColor: AppColors.paper.withValues(alpha: 0.92),
+              foregroundColor: AppColors.tealDark,
+              side: BorderSide(color: AppColors.teal.withValues(alpha: 0.16)),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+            )
+          : null,
+      icon: isRefreshing
+          ? const SizedBox.square(dimension: 22, child: CircularProgressIndicator(strokeWidth: 2.5))
+          : const Icon(Icons.refresh_rounded),
+    );
+  }
 }
 
 class _BrandMark extends StatelessWidget {
@@ -293,39 +358,31 @@ class _BrandMark extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Semantics(
-      label: 'BoBo Learning 标志',
-      child: SizedBox.square(
-        dimension: 64,
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            Transform.rotate(
-              angle: -0.12,
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  color: AppColors.teal,
-                  borderRadius: BorderRadius.circular(21),
-                  boxShadow: [
-                    BoxShadow(
-                      color: AppColors.teal.withValues(alpha: 0.24),
-                      blurRadius: 18,
-                      offset: const Offset(0, 8),
-                    ),
-                  ],
-                ),
-                child: const SizedBox.square(dimension: 56),
-              ),
-            ),
-            const Icon(Icons.auto_stories_rounded, color: Colors.white, size: 31),
-            const Positioned(
-              right: 1,
-              top: 1,
-              child: DecoratedBox(
-                decoration: BoxDecoration(color: AppColors.sunshine, shape: BoxShape.circle),
-                child: SizedBox.square(dimension: 17),
-              ),
+      label: '菠萝早教标志',
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: AppColors.sunshine.withValues(alpha: 0.3)),
+          boxShadow: [
+            BoxShadow(
+              color: AppColors.sunshine.withValues(alpha: 0.22),
+              blurRadius: 18,
+              offset: const Offset(0, 8),
             ),
           ],
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(19),
+          child: Image.asset(
+            'assets/branding/pineapple_icon.png',
+            key: const Key('菠萝早教品牌图标'),
+            width: 64,
+            height: 64,
+            fit: BoxFit.cover,
+            filterQuality: FilterQuality.high,
+            excludeFromSemantics: true,
+          ),
         ),
       ),
     );
@@ -341,10 +398,10 @@ class _FolderHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     return Semantics(
       header: true,
-      child: Row(
-        key: Key('分类标题-${group.displayName}'),
-        children: [
-          DecoratedBox(
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final compact = constraints.maxWidth < 600;
+          final folderIcon = DecoratedBox(
             decoration: BoxDecoration(
               color: AppColors.teal.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(15),
@@ -353,19 +410,21 @@ class _FolderHeader extends StatelessWidget {
               dimension: 44,
               child: Icon(Icons.folder_rounded, color: AppColors.tealDark, size: 26),
             ),
-          ),
-          const SizedBox(width: 12),
-          Flexible(
-            child: Text(
-              group.displayName,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.titleLarge
-                  ?.copyWith(color: AppColors.ink, fontWeight: FontWeight.w900),
+          );
+          final folderName = Text(
+            group.displayName,
+            key: Key('分类名称-${group.displayName}'),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.titleLarge?.copyWith(
+              color: AppColors.ink,
+              fontSize: compact ? 20 : null,
+              height: compact ? 1.16 : null,
+              fontWeight: FontWeight.w900,
             ),
-          ),
-          const SizedBox(width: 10),
-          DecoratedBox(
+          );
+          final countBadge = DecoratedBox(
+            key: Key('分类数量-${group.displayName}'),
             decoration: BoxDecoration(
               color: AppColors.sunshine.withValues(alpha: 0.28),
               borderRadius: BorderRadius.circular(999),
@@ -378,105 +437,265 @@ class _FolderHeader extends StatelessWidget {
                     ?.copyWith(color: AppColors.ink, fontWeight: FontWeight.w800),
               ),
             ),
-          ),
-          const SizedBox(width: 14),
-          Expanded(child: Divider(color: AppColors.teal.withValues(alpha: 0.14), thickness: 1.4)),
-        ],
+          );
+          final divider = Divider(color: AppColors.teal.withValues(alpha: 0.14), thickness: 1.4);
+
+          if (compact) {
+            return Column(
+              key: Key('分类标题-${group.displayName}'),
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    folderIcon,
+                    const SizedBox(width: 12),
+                    Expanded(child: folderName),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Padding(
+                  padding: const EdgeInsets.only(left: 56),
+                  child: Row(
+                    children: [
+                      countBadge,
+                      const SizedBox(width: 12),
+                      Expanded(child: divider),
+                    ],
+                  ),
+                ),
+              ],
+            );
+          }
+
+          return Row(
+            key: Key('分类标题-${group.displayName}'),
+            children: [
+              folderIcon,
+              const SizedBox(width: 12),
+              Flexible(child: folderName),
+              const SizedBox(width: 10),
+              countBadge,
+              const SizedBox(width: 14),
+              Expanded(child: divider),
+            ],
+          );
+        },
       ),
     );
   }
 }
 
-class _VideoCard extends StatelessWidget {
-  const _VideoCard({required this.video, required this.colorIndex, required this.onTap, super.key});
+class _FolderVideoStrip extends StatefulWidget {
+  const _FolderVideoStrip({
+    required this.group,
+    required this.colorOffset,
+    required this.onVideoTap,
+    required this.onViewMore,
+  });
 
-  final VideoItem video;
-  final int colorIndex;
+  final VideoFolderGroup group;
+  final int colorOffset;
+  final ValueChanged<int> onVideoTap;
+  final VoidCallback onViewMore;
+
+  @override
+  State<_FolderVideoStrip> createState() => _FolderVideoStripState();
+}
+
+class _FolderVideoStripState extends State<_FolderVideoStrip> {
+  static const int _previewVideoLimit = 4;
+
+  late final ScrollController _scrollController;
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollController = ScrollController();
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final hasMore = widget.group.items.length > _previewVideoLimit;
+    final visibleVideoCount = hasMore ? _previewVideoLimit : widget.group.items.length;
+    final slotCount = visibleVideoCount + (hasMore ? 1 : 0);
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final cardWidth = switch (constraints.maxWidth) {
+          < 600 => 170.0,
+          < 900 => 200.0,
+          _ => 224.0,
+        };
+        final cardHeight = cardWidth / 0.82;
+        return SizedBox(
+          height: cardHeight + 8,
+          child: ScrollConfiguration(
+            behavior: ScrollConfiguration.of(context).copyWith(
+              dragDevices: const {
+                PointerDeviceKind.touch,
+                PointerDeviceKind.mouse,
+                PointerDeviceKind.stylus,
+                PointerDeviceKind.trackpad,
+              },
+            ),
+            child: Scrollbar(
+              controller: _scrollController,
+              interactive: true,
+              radius: const Radius.circular(999),
+              child: ListView.separated(
+                key: Key('分类横向书架-${widget.group.displayName}'),
+                controller: _scrollController,
+                scrollDirection: Axis.horizontal,
+                physics: const BouncingScrollPhysics(),
+                padding: const EdgeInsets.only(bottom: 8),
+                itemCount: slotCount,
+                separatorBuilder: (context, index) => const SizedBox(width: 16),
+                itemBuilder: (context, index) {
+                  if (hasMore && index == visibleVideoCount) {
+                    return SizedBox(
+                      width: cardWidth,
+                      child: _ViewMoreCard(
+                        folderName: widget.group.displayName,
+                        remainingCount: widget.group.items.length - visibleVideoCount,
+                        totalCount: widget.group.items.length,
+                        onTap: widget.onViewMore,
+                      ),
+                    );
+                  }
+                  final video = widget.group.items[index];
+                  return SizedBox(
+                    width: cardWidth,
+                    child: VideoCard(
+                      key: ValueKey(video.id),
+                      video: video,
+                      colorIndex: widget.colorOffset + index,
+                      onTap: () => widget.onVideoTap(index),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _ViewMoreCard extends StatelessWidget {
+  const _ViewMoreCard({
+    required this.folderName,
+    required this.remainingCount,
+    required this.totalCount,
+    required this.onTap,
+  });
+
+  final String folderName;
+  final int remainingCount;
+  final int totalCount;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    const accentColors = [AppColors.teal, AppColors.coral, AppColors.sky, AppColors.sunshine];
-    final accent = accentColors[colorIndex % accentColors.length];
     return Semantics(
       button: true,
-      label: '播放${video.title}',
+      label: '查看$folderName中的全部$totalCount个视频',
       child: Material(
         color: AppColors.paper,
-        elevation: 0,
-        shadowColor: AppColors.ink.withValues(alpha: 0.14),
         borderRadius: BorderRadius.circular(26),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
-          key: Key('视频卡片-${video.id}'),
+          key: Key('查看更多-$folderName'),
           onTap: onTap,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Expanded(
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    Hero(
-                      tag: '封面-${video.id}',
-                      child: Image.network(
-                        video.coverUri.toString(),
-                        fit: BoxFit.cover,
-                        loadingBuilder: (context, child, progress) {
-                          if (progress == null) {
-                            return child;
-                          }
-                          return _CoverPlaceholder(accent: accent, loading: true);
-                        },
-                        errorBuilder: (context, error, stackTrace) {
-                          return _CoverPlaceholder(accent: accent, loading: false);
-                        },
-                      ),
-                    ),
-                    Positioned(
-                      right: 12,
-                      bottom: 12,
-                      child: DecoratedBox(
+          child: Ink(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  AppColors.teal.withValues(alpha: 0.2),
+                  AppColors.sky.withValues(alpha: 0.12),
+                  AppColors.sunshine.withValues(alpha: 0.2),
+                ],
+              ),
+            ),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final compact = constraints.maxWidth < 190;
+                return Padding(
+                  padding: EdgeInsets.all(compact ? 16 : 20),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      DecoratedBox(
                         decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.94),
-                          shape: BoxShape.circle,
-                          boxShadow: [
-                            BoxShadow(
-                              color: AppColors.ink.withValues(alpha: 0.15),
-                              blurRadius: 12,
-                              offset: const Offset(0, 4),
-                            ),
-                          ],
+                          color: Colors.white.withValues(alpha: 0.9),
+                          borderRadius: BorderRadius.circular(compact ? 18 : 22),
                         ),
-                        child: Padding(
-                          padding: const EdgeInsets.all(10),
-                          child: Icon(Icons.play_arrow_rounded, color: accent, size: 28),
+                        child: SizedBox.square(
+                          dimension: compact ? 56 : 72,
+                          child: Icon(
+                            Icons.video_collection_rounded,
+                            color: AppColors.tealDark,
+                            size: compact ? 32 : 38,
+                          ),
                         ),
                       ),
-                    ),
-                  ],
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 14, 14, 15),
-                child: Row(
-                  children: [
-                    DecoratedBox(
-                      decoration: BoxDecoration(color: accent, shape: BoxShape.circle),
-                      child: const SizedBox.square(dimension: 9),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        video.title,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.titleMedium,
+                      SizedBox(height: compact ? 12 : 18),
+                      Text(
+                        '查看更多',
+                        style: compact
+                            ? Theme.of(context).textTheme.titleMedium
+                            : Theme.of(context).textTheme.titleLarge,
                       ),
-                    ),
-                  ],
-                ),
-              ),
+                      SizedBox(height: compact ? 5 : 7),
+                      Text(
+                        '还有 $remainingCount 个视频',
+                        style: Theme.of(context).textTheme.bodyMedium
+                            ?.copyWith(color: AppColors.tealDark, fontWeight: FontWeight.w700),
+                      ),
+                      SizedBox(height: compact ? 10 : 14),
+                      Icon(
+                        Icons.arrow_forward_rounded,
+                        color: AppColors.coral,
+                        size: compact ? 24 : 28,
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _LoadingSections extends StatelessWidget {
+  const _LoadingSections({required this.sidePadding});
+
+  final double sidePadding;
+
+  @override
+  Widget build(BuildContext context) {
+    return SliverPadding(
+      padding: EdgeInsets.symmetric(horizontal: sidePadding),
+      sliver: SliverToBoxAdapter(
+        child: ExcludeSemantics(
+          child: Column(
+            key: const Key('分类骨架屏'),
+            children: const [
+              _LoadingSection(sectionIndex: 0),
+              SizedBox(height: 32),
+              _LoadingSection(sectionIndex: 1),
             ],
           ),
         ),
@@ -485,85 +704,151 @@ class _VideoCard extends StatelessWidget {
   }
 }
 
-class _CoverPlaceholder extends StatelessWidget {
-  const _CoverPlaceholder({required this.accent, required this.loading});
+class _LoadingSection extends StatelessWidget {
+  const _LoadingSection({required this.sectionIndex});
 
-  final Color accent;
-  final bool loading;
+  final int sectionIndex;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxWidth < 600;
+        final cardWidth = switch (constraints.maxWidth) {
+          < 600 => 170.0,
+          < 900 => 200.0,
+          _ => 224.0,
+        };
+        final cardHeight = cardWidth / 0.82;
+        final header = compact
+            ? Column(
+                children: [
+                  Row(
+                    children: [
+                      _SkeletonBlock(
+                        width: 44,
+                        height: 44,
+                        borderRadius: BorderRadius.circular(15),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _SkeletonBlock(height: 46, borderRadius: BorderRadius.circular(9)),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Padding(
+                    padding: const EdgeInsets.only(left: 56),
+                    child: Row(
+                      children: [
+                        _SkeletonBlock(
+                          width: 64,
+                          height: 28,
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: _SkeletonBlock(
+                            height: 2,
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              )
+            : Row(
+                children: [
+                  _SkeletonBlock(width: 44, height: 44, borderRadius: BorderRadius.circular(15)),
+                  const SizedBox(width: 12),
+                  _SkeletonBlock(width: 96, height: 23, borderRadius: BorderRadius.circular(9)),
+                  const SizedBox(width: 10),
+                  _SkeletonBlock(width: 64, height: 28, borderRadius: BorderRadius.circular(999)),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: _SkeletonBlock(height: 2, borderRadius: BorderRadius.circular(999)),
+                  ),
+                ],
+              );
+        return Column(
+          key: Key('分类骨架分区-$sectionIndex'),
+          children: [
+            header,
+            const SizedBox(height: 14),
+            SizedBox(
+              height: cardHeight,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: 5,
+                separatorBuilder: (context, index) => const SizedBox(width: 16),
+                itemBuilder: (context, index) => SizedBox(
+                  width: cardWidth,
+                  child: _LoadingVideoCard(key: Key('骨架视频卡片-$sectionIndex-$index')),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _LoadingVideoCard extends StatelessWidget {
+  const _LoadingVideoCard({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: AppColors.paper.withValues(alpha: 0.82),
+        borderRadius: BorderRadius.circular(26),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: _SkeletonBlock(
+                width: double.infinity,
+                borderRadius: BorderRadius.circular(19),
+              ),
+            ),
+            const SizedBox(height: 14),
+            _SkeletonBlock(width: 116, height: 16, borderRadius: BorderRadius.circular(8)),
+            const SizedBox(height: 8),
+            _SkeletonBlock(width: 82, height: 14, borderRadius: BorderRadius.circular(7)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SkeletonBlock extends StatelessWidget {
+  const _SkeletonBlock({this.width, this.height, required this.borderRadius});
+
+  final double? width;
+  final double? height;
+  final BorderRadius borderRadius;
 
   @override
   Widget build(BuildContext context) {
     return DecoratedBox(
       decoration: BoxDecoration(
         gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [accent.withValues(alpha: 0.22), accent.withValues(alpha: 0.08)],
+          colors: [
+            AppColors.teal.withValues(alpha: 0.08),
+            AppColors.sky.withValues(alpha: 0.13),
+            AppColors.teal.withValues(alpha: 0.08),
+          ],
         ),
+        borderRadius: borderRadius,
       ),
-      child: Center(
-        child: loading
-            ? CircularProgressIndicator(color: accent, strokeWidth: 3)
-            : Icon(Icons.image_not_supported_rounded, color: accent, size: 42),
-      ),
-    );
-  }
-}
-
-class _LoadingGrid extends StatelessWidget {
-  const _LoadingGrid({required this.sidePadding});
-
-  final double sidePadding;
-
-  @override
-  Widget build(BuildContext context) {
-    return SliverPadding(
-      padding: EdgeInsets.symmetric(horizontal: sidePadding),
-      sliver: SliverGrid(
-        gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-          maxCrossAxisExtent: 270,
-          childAspectRatio: 0.82,
-          crossAxisSpacing: 16,
-          mainAxisSpacing: 18,
-        ),
-        delegate: SliverChildBuilderDelegate(
-          (context, index) => DecoratedBox(
-            decoration: BoxDecoration(
-              color: AppColors.paper.withValues(alpha: 0.84),
-              borderRadius: BorderRadius.circular(26),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.all(14),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        color: AppColors.teal.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(18),
-                      ),
-                      child: const SizedBox.expand(),
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  FractionallySizedBox(
-                    widthFactor: 0.68,
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        color: AppColors.ink.withValues(alpha: 0.09),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: const SizedBox(height: 17),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          childCount: 8,
-        ),
-      ),
+      child: SizedBox(width: width, height: height),
     );
   }
 }

@@ -1,11 +1,11 @@
 {
-    "name": "BoBo Learning",
-    "short_name": "BoBo",
+    "name": "菠萝早教",
+    "short_name": "菠萝早教",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#FFF8EA",
     "theme_color": "#2A9D8F",
-    "description": "BoBo Learning 儿童早教视频",
+    "description": "菠萝早教儿童早教视频",
     "orientation": "any",
     "prefer_related_applications": false,
     "icons": [

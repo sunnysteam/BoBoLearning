@@ -186,7 +186,7 @@ mod tests {
         let web = root.path().join("web");
         fs::create_dir_all(media.join("课程")).expect("媒体目录应创建成功");
         fs::create_dir_all(&web).expect("网页目录应创建成功");
-        fs::write(web.join("index.html"), "<html>BoBo Learning</html>").expect("首页应写入成功");
+        fs::write(web.join("index.html"), "<html>菠萝早教</html>").expect("首页应写入成功");
         fs::write(media.join("课程/颜色.mp4"), b"0123456789").expect("视频应写入成功");
         fs::write(media.join("课程/颜色.png"), b"cover").expect("封面应写入成功");
 
@@ -349,6 +349,6 @@ mod tests {
             .await
             .expect("响应体应读取成功")
             .to_bytes();
-        assert_eq!(&body[..], b"<html>BoBo Learning</html>");
+        assert_eq!(&body[..], "<html>菠萝早教</html>".as_bytes());
     }
 }

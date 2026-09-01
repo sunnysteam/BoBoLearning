@@ -1,3 +1,4 @@
 .env
 *.log
 /output/
+/.playwright-cli/

@@ -4,12 +4,7 @@ import 'package:flutter/material.dart';
 
 /// 首页书架与文件夹详情页共用的视频封面卡片。
 class VideoCard extends StatelessWidget {
-  const VideoCard({
-    required this.video,
-    required this.colorIndex,
-    required this.onTap,
-    super.key,
-  });
+  const VideoCard({required this.video, required this.colorIndex, required this.onTap, super.key});
 
   final VideoItem video;
   final int colorIndex;
@@ -17,13 +12,10 @@ class VideoCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const accentColors = [
-      AppColors.teal,
-      AppColors.coral,
-      AppColors.sky,
-      AppColors.sunshine,
-    ];
+    const accentColors = [AppColors.teal, AppColors.coral, AppColors.sky, AppColors.sunshine];
     final accent = accentColors[colorIndex % accentColors.length];
+    final titleStyle = Theme.of(context).textTheme.titleMedium;
+    final titleSlotHeight = _measureTwoLineTitleHeight(context, titleStyle);
     return Semantics(
       button: true,
       label: '播放${video.title}',
@@ -76,11 +68,7 @@ class VideoCard extends StatelessWidget {
                         ),
                         child: Padding(
                           padding: const EdgeInsets.all(10),
-                          child: Icon(
-                            Icons.play_arrow_rounded,
-                            color: accent,
-                            size: 28,
-                          ),
+                          child: Icon(Icons.play_arrow_rounded, color: accent, size: 28),
                         ),
                       ),
                     ),
@@ -90,18 +78,29 @@ class VideoCard extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 14, 14, 15),
                 child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    DecoratedBox(
-                      decoration: BoxDecoration(color: accent, shape: BoxShape.circle),
-                      child: const SizedBox.square(dimension: 9),
+                    Padding(
+                      padding: EdgeInsets.only(top: (titleSlotHeight / 4) - 4.5),
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(color: accent, shape: BoxShape.circle),
+                        child: const SizedBox.square(dimension: 9),
+                      ),
                     ),
                     const SizedBox(width: 10),
                     Expanded(
-                      child: Text(
-                        video.title,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.titleMedium,
+                      child: SizedBox(
+                        key: Key('视频标题区域-${video.id}'),
+                        height: titleSlotHeight,
+                        child: Align(
+                          alignment: Alignment.topLeft,
+                          child: Text(
+                            video.title,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: titleStyle,
+                          ),
+                        ),
                       ),
                     ),
                   ],
@@ -113,6 +112,17 @@ class VideoCard extends StatelessWidget {
       ),
     );
   }
+}
+
+/// 根据当前字体和系统文字缩放计算固定的两行标题高度。
+double _measureTwoLineTitleHeight(BuildContext context, TextStyle? style) {
+  final painter = TextPainter(
+    text: TextSpan(text: '标题Ag\n标题Ag', style: style),
+    maxLines: 2,
+    textDirection: Directionality.of(context),
+    textScaler: MediaQuery.textScalerOf(context),
+  )..layout();
+  return painter.height;
 }
 
 class _CoverPlaceholder extends StatelessWidget {

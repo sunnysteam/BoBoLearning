@@ -2,7 +2,7 @@
 name = "bobo_learning_service"
 version = "0.1.0"
 edition = "2024"
-description = "BoBo Learning 儿童早教视频服务"
+description = "菠萝早教儿童早教视频服务"
 publish = false
 
 [dependencies]

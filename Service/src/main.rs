@@ -68,7 +68,7 @@ async fn run() -> Result<()> {
         .await
         .with_context(|| format!("无法监听地址 {}", config.bind_addr))?;
     info!(
-        "BoBo Learning 服务已启动：http://{}，媒体目录={}，自动封面缓存={}，网页目录={}",
+        "菠萝早教服务已启动：http://{}，媒体目录={}，自动封面缓存={}，网页目录={}",
         config.bind_addr,
         config.media_dir.display(),
         config.cover_cache_dir.display(),
@@ -91,7 +91,7 @@ async fn run() -> Result<()> {
         }
     }
     server_result.context("HTTP 服务异常退出")?;
-    info!("BoBo Learning 服务已停止");
+    info!("菠萝早教服务已停止");
     Ok(())
 }
 

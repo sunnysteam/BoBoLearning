@@ -8,7 +8,7 @@ import 'package:bobo_learning/ui/features/player/services/playback_controller.da
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
-/// BoBo Learning 应用根节点，统一管理应用级依赖的生命周期。
+/// 菠萝早教应用根节点，统一管理应用级依赖的生命周期。
 class BoBoLearningApp extends StatefulWidget {
   const BoBoLearningApp({required this.config, super.key});
 
@@ -47,7 +47,7 @@ class _BoBoLearningAppState extends State<BoBoLearningApp> {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'BoBo Learning',
+      title: '菠萝早教',
       theme: AppTheme.light,
       home: HomePage(
         playbackControllerFactory: _playbackControllerFactory,

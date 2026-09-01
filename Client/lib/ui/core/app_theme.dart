@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-/// BoBo Learning 统一设计令牌。
+/// 菠萝早教统一设计令牌。
 abstract final class AppColors {
   static const cream = Color(0xFFFFF8EA);
   static const paper = Color(0xFFFFFDF7);

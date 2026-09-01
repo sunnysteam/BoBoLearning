@@ -1,5 +1,5 @@
 name: bobo_learning
-description: BoBo Learning 儿童早教视频客户端
+description: 菠萝早教儿童早教视频客户端
 publish_to: none
 version: 0.1.0+1
 
@@ -20,3 +20,5 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/branding/pineapple_icon.png
