@@ -5,10 +5,11 @@ import 'package:bobo_learning/ui/core/app_theme.dart';
 import 'package:bobo_learning/ui/features/home/view_models/home_view_model.dart';
 import 'package:bobo_learning/ui/features/home/views/home_page.dart';
 import 'package:bobo_learning/ui/features/player/services/playback_controller.dart';
+import 'package:bobo_learning/ui/features/portal/views/portal_page.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
-/// 菠萝早教应用根节点，统一管理应用级依赖的生命周期。
+/// 菠萝乐园应用根节点，统一管理应用级依赖的生命周期。
 class BoBoLearningApp extends StatefulWidget {
   const BoBoLearningApp({required this.config, super.key});
 
@@ -47,11 +48,14 @@ class _BoBoLearningAppState extends State<BoBoLearningApp> {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: '菠萝早教',
+      title: '菠萝乐园',
       theme: AppTheme.light,
-      home: HomePage(
-        playbackControllerFactory: _playbackControllerFactory,
-        viewModel: _homeViewModel,
+      home: PortalPage(
+        earlyLearningPageBuilder: (_) => HomePage(
+          showBackButton: true,
+          playbackControllerFactory: _playbackControllerFactory,
+          viewModel: _homeViewModel,
+        ),
       ),
     );
   }

@@ -1,29 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-FROM debian:bookworm-slim AS flutter-builder
-
-ARG FLUTTER_VERSION=3.47.2
-RUN apt-get update \
-    && apt-get install --yes --no-install-recommends ca-certificates curl git unzip xz-utils zip \
-    && rm -rf /var/lib/apt/lists/* \
-    && git clone --branch "${FLUTTER_VERSION}" --depth 1 \
-        https://github.com/flutter/flutter.git /opt/flutter
-
-ENV PATH=/opt/flutter/bin:/opt/flutter/bin/cache/dart-sdk/bin:${PATH}
-RUN flutter config --no-analytics --enable-web \
-    && flutter precache --web
-
-WORKDIR /workspace/Client
-
-COPY Client/pubspec.yaml Client/pubspec.lock ./
-RUN flutter pub get
-
-COPY Client/lib ./lib
-COPY Client/web ./web
-COPY Client/analysis_options.yaml Client/.metadata ./
-RUN flutter build web --release --base-href=/
-
-FROM rust:1.95.0-bookworm AS rust-builder
+FROM rust:1.98.0-bookworm AS builder
 WORKDIR /workspace/Service
 
 COPY Service/Cargo.toml Service/Cargo.lock ./
@@ -51,18 +28,15 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     && test "${install_succeeded}" = "1" \
     && groupadd --system --gid 10001 bobo \
     && useradd --system --uid 10001 --gid bobo --home-dir /nonexistent --shell /usr/sbin/nologin bobo \
-    && mkdir --parents /app/cover-cache /app/media /app/web \
+    && mkdir --parents /app/cover-cache /app/media \
     && chown --recursive bobo:bobo /app
 
-COPY --from=rust-builder --chown=bobo:bobo \
+COPY --from=builder --chown=bobo:bobo \
     /workspace/Service/target/release/bobo_learning_service /app/bobo-learning-service
-COPY --from=flutter-builder --chown=bobo:bobo /workspace/Client/build/web /app/web
-COPY --from=flutter-builder --chown=bobo:bobo \
-    /workspace/Client/build/web/icons/Icon-512.png /app/default-cover.png
+COPY --chown=bobo:bobo Service/assets/default-cover.png /app/default-cover.png
 
 ENV BOBO_BIND=0.0.0.0:8080 \
     BOBO_MEDIA_DIR=/app/media \
-    BOBO_WEB_DIR=/app/web \
     BOBO_COVER_CACHE_DIR=/app/cover-cache \
     BOBO_DEFAULT_COVER_PATH=/app/default-cover.png \
     BOBO_FFMPEG_BIN=ffmpeg \

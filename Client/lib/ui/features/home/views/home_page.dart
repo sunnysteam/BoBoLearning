@@ -10,10 +10,16 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 class HomePage extends StatefulWidget {
-  const HomePage({required this.viewModel, required this.playbackControllerFactory, super.key});
+  const HomePage({
+    required this.viewModel,
+    required this.playbackControllerFactory,
+    this.showBackButton = false,
+    super.key,
+  });
 
   final HomeViewModel viewModel;
   final PlaybackControllerFactory playbackControllerFactory;
+  final bool showBackButton;
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -140,6 +146,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                               videoCount: widget.viewModel.items.length,
                               isRefreshing: widget.viewModel.isRefreshing,
                               onRefresh: () => widget.viewModel.refresh(silent: true),
+                              onBack: widget.showBackButton
+                                  ? () => Navigator.of(context).maybePop()
+                                  : null,
                             ),
                           ),
                         ),
@@ -203,11 +212,13 @@ class _HomeHeader extends StatelessWidget {
     required this.videoCount,
     required this.isRefreshing,
     required this.onRefresh,
+    required this.onBack,
   });
 
   final int videoCount;
   final bool isRefreshing;
   final VoidCallback onRefresh;
+  final VoidCallback? onBack;
 
   @override
   Widget build(BuildContext context) {
@@ -218,6 +229,20 @@ class _HomeHeader extends StatelessWidget {
         final brand = Row(
           mainAxisSize: MainAxisSize.min,
           children: [
+            if (onBack != null) ...[
+              IconButton(
+                key: const Key('菠萝早教返回首页按钮'),
+                tooltip: '返回菠萝首页',
+                onPressed: onBack,
+                style: IconButton.styleFrom(
+                  backgroundColor: AppColors.paper.withValues(alpha: 0.94),
+                  foregroundColor: AppColors.ink,
+                  side: BorderSide(color: AppColors.teal.withValues(alpha: 0.16)),
+                ),
+                icon: const Icon(Icons.arrow_back_rounded),
+              ),
+              const SizedBox(width: 10),
+            ],
             const _BrandMark(),
             const SizedBox(width: 14),
             Flexible(
@@ -226,8 +251,10 @@ class _HomeHeader extends StatelessWidget {
                 children: [
                   Text(
                     '菠萝早教',
-                    style: Theme.of(context).textTheme.headlineMedium
-                        ?.copyWith(fontSize: compact ? 26 : 32, letterSpacing: -0.8),
+                    style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                      fontSize: compact ? 26 : 32,
+                      letterSpacing: -0.8,
+                    ),
                   ),
                   const SizedBox(height: 3),
                   Text(
@@ -261,8 +288,9 @@ class _HomeHeader extends StatelessWidget {
                 Text(
                   countLabel,
                   key: const Key('首页视频总数'),
-                  style: Theme.of(context).textTheme.labelLarge
-                      ?.copyWith(color: AppColors.tealDark),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.labelLarge?.copyWith(color: AppColors.tealDark),
                 ),
                 const SizedBox(width: 6),
                 _buildRefreshButton(),
@@ -302,8 +330,9 @@ class _HomeHeader extends StatelessWidget {
                               Text(
                                 countLabel,
                                 key: const Key('首页视频总数'),
-                                style: Theme.of(context).textTheme.labelLarge
-                                    ?.copyWith(color: AppColors.tealDark),
+                                style: Theme.of(
+                                  context,
+                                ).textTheme.labelLarge?.copyWith(color: AppColors.tealDark),
                               ),
                             ],
                           ),
@@ -433,8 +462,10 @@ class _FolderHeader extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
               child: Text(
                 '${group.items.length} 个视频',
-                style: Theme.of(context).textTheme.labelMedium
-                    ?.copyWith(color: AppColors.ink, fontWeight: FontWeight.w800),
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                  color: AppColors.ink,
+                  fontWeight: FontWeight.w800,
+                ),
               ),
             ),
           );
@@ -658,8 +689,10 @@ class _ViewMoreCard extends StatelessWidget {
                       SizedBox(height: compact ? 5 : 7),
                       Text(
                         '还有 $remainingCount 个视频',
-                        style: Theme.of(context).textTheme.bodyMedium
-                            ?.copyWith(color: AppColors.tealDark, fontWeight: FontWeight.w700),
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: AppColors.tealDark,
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
                       SizedBox(height: compact ? 10 : 14),
                       Icon(

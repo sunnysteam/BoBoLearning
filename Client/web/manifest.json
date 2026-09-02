@@ -1,11 +1,11 @@
 {
-    "name": "菠萝早教",
-    "short_name": "菠萝早教",
+    "name": "菠萝乐园",
+    "short_name": "菠萝乐园",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#FFF8EA",
     "theme_color": "#2A9D8F",
-    "description": "菠萝早教儿童早教视频",
+    "description": "菠萝乐园儿童内容应用",
     "orientation": "any",
     "prefer_related_applications": false,
     "icons": [

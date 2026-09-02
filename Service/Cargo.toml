@@ -2,7 +2,8 @@
 name = "bobo_learning_service"
 version = "0.1.0"
 edition = "2024"
-description = "菠萝早教儿童早教视频服务"
+rust-version = "1.98"
+description = "菠萝乐园儿童内容服务"
 publish = false
 
 [dependencies]

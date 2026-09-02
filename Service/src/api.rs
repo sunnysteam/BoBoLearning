@@ -17,7 +17,7 @@ use serde::Serialize;
 use tower::ServiceExt;
 use tower_http::{
     cors::{Any, CorsLayer},
-    services::{ServeDir, ServeFile},
+    services::ServeFile,
 };
 
 use crate::discovery::{CatalogStore, VideoEntry};
@@ -59,9 +59,8 @@ struct ErrorResponse {
     message: &'static str,
 }
 
-/// 构建 API 与 Flutter Web 同源路由。
-pub fn build_router(state: AppState, web_dir: PathBuf) -> Router {
-    let index_file = web_dir.join("index.html");
+/// 构建独立的媒体 API 路由。
+pub fn build_router(state: AppState) -> Router {
     let api = Router::new()
         .route("/videos", get(list_videos))
         .route("/videos/{id}/cover", get(serve_cover))
@@ -78,7 +77,7 @@ pub fn build_router(state: AppState, web_dir: PathBuf) -> Router {
         .route("/healthz", get(health))
         .nest("/api/v1", api)
         .route("/api/{*path}", any(api_not_found))
-        .fallback_service(ServeDir::new(web_dir).fallback(ServeFile::new(index_file)))
+        .fallback(api_not_found)
         .layer(cors)
         .with_state(state)
 }
@@ -183,21 +182,15 @@ mod tests {
     fn test_app() -> (TempDir, Router, String) {
         let root = tempdir().expect("临时目录应创建成功");
         let media = root.path().join("media");
-        let web = root.path().join("web");
         fs::create_dir_all(media.join("课程")).expect("媒体目录应创建成功");
-        fs::create_dir_all(&web).expect("网页目录应创建成功");
-        fs::write(web.join("index.html"), "<html>菠萝早教</html>").expect("首页应写入成功");
         fs::write(media.join("课程/颜色.mp4"), b"0123456789").expect("视频应写入成功");
         fs::write(media.join("课程/颜色.png"), b"cover").expect("封面应写入成功");
 
         let report = scan_media(&media).expect("媒体扫描应成功");
         let id = report.catalog.entries()[0].id.clone();
-        let app = build_router(
-            AppState {
-                catalog: CatalogStore::new(report.catalog),
-            },
-            web,
-        );
+        let app = build_router(AppState {
+            catalog: CatalogStore::new(report.catalog),
+        });
         (root, app, id)
     }
 
@@ -330,7 +323,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn 前端路径回退到_flutter_首页() {
+    async fn 非_api_路径由独立服务返回中文_json_404() {
         let (_root, app, _) = test_app();
         let response = app
             .oneshot(
@@ -342,13 +335,7 @@ mod tests {
             .await
             .expect("请求应成功");
 
-        assert_eq!(response.status(), StatusCode::OK);
-        let body = response
-            .into_body()
-            .collect()
-            .await
-            .expect("响应体应读取成功")
-            .to_bytes();
-        assert_eq!(&body[..], "<html>菠萝早教</html>".as_bytes());
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        assert_eq!(response.headers()[CONTENT_TYPE], "application/json");
     }
 }

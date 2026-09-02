@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-/// 菠萝早教统一设计令牌。
+/// 菠萝乐园统一设计令牌。
 abstract final class AppColors {
   static const cream = Color(0xFFFFF8EA);
   static const paper = Color(0xFFFFFDF7);
@@ -9,6 +9,10 @@ abstract final class AppColors {
   static const coral = Color(0xFFF47C68);
   static const sunshine = Color(0xFFF4C95D);
   static const sky = Color(0xFF66B7D9);
+  static const mintMist = Color(0xFFE4F5E9);
+  static const peachMist = Color(0xFFFFE8DC);
+  static const skyMist = Color(0xFFE4F3FA);
+  static const lavender = Color(0xFF766DC4);
   static const ink = Color(0xFF24364B);
   static const mutedInk = Color(0xFF657488);
   static const player = Color(0xFF10263A);

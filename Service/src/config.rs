@@ -14,7 +14,6 @@ use anyhow::{Context, Result, bail};
 pub struct AppConfig {
     pub bind_addr: SocketAddr,
     pub media_dir: PathBuf,
-    pub web_dir: PathBuf,
     pub cover_cache_dir: PathBuf,
     pub default_cover_path: PathBuf,
     pub ffmpeg_bin: OsString,
@@ -33,23 +32,10 @@ impl AppConfig {
             .context("BOBO_BIND 不是有效的监听地址")?;
 
         let media_dir = env_path("BOBO_MEDIA_DIR").unwrap_or_else(|| manifest_dir.join("media"));
-        let web_dir = env_path("BOBO_WEB_DIR").unwrap_or_else(|| {
-            manifest_dir
-                .join("..")
-                .join("Client")
-                .join("build")
-                .join("web")
-        });
         let cover_cache_dir =
             env_path("BOBO_COVER_CACHE_DIR").unwrap_or_else(|| manifest_dir.join("cover-cache"));
-        let default_cover_path = env_path("BOBO_DEFAULT_COVER_PATH").unwrap_or_else(|| {
-            manifest_dir
-                .join("..")
-                .join("Client")
-                .join("web")
-                .join("icons")
-                .join("Icon-512.png")
-        });
+        let default_cover_path = env_path("BOBO_DEFAULT_COVER_PATH")
+            .unwrap_or_else(|| manifest_dir.join("assets").join("default-cover.png"));
         let ffmpeg_bin = env::var_os("BOBO_FFMPEG_BIN")
             .filter(|value| !value.is_empty())
             .unwrap_or_else(|| OsString::from("ffmpeg"));
@@ -66,7 +52,6 @@ impl AppConfig {
         let config = Self {
             bind_addr,
             media_dir,
-            web_dir,
             cover_cache_dir,
             default_cover_path,
             ffmpeg_bin,
@@ -81,14 +66,6 @@ impl AppConfig {
     fn validate(&self) -> Result<()> {
         if !self.media_dir.is_dir() {
             bail!("媒体目录不存在或不是文件夹：{}", self.media_dir.display());
-        }
-
-        let index_file = self.web_dir.join("index.html");
-        if !index_file.is_file() {
-            bail!(
-                "Flutter Web 构建文件不存在：{}，请先执行 flutter build web",
-                index_file.display()
-            );
         }
 
         fs::create_dir_all(&self.cover_cache_dir).with_context(|| {
