@@ -243,26 +243,30 @@ class _HomeHeader extends StatelessWidget {
               ),
               const SizedBox(width: 10),
             ],
-            const _BrandMark(),
-            const SizedBox(width: 14),
+            if (onBack == null) ...[const _BrandMark(), const SizedBox(width: 14)],
             Flexible(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    '菠萝早教',
-                    style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                      fontSize: compact ? 26 : 32,
-                      letterSpacing: -0.8,
+              child: onBack == null
+                  ? Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '菠萝早教',
+                          style: Theme.of(context).textTheme.headlineMedium
+                              ?.copyWith(fontSize: compact ? 26 : 32, letterSpacing: -0.8),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          '发现一个好奇心满满的今天',
+                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontSize: 15),
+                        ),
+                      ],
+                    )
+                  : Text(
+                      '菠萝早教',
+                      key: const Key('菠萝早教子页面标题'),
+                      style: Theme.of(context).textTheme.headlineMedium
+                          ?.copyWith(fontSize: compact ? 26 : 32, letterSpacing: -0.8),
                     ),
-                  ),
-                  const SizedBox(height: 3),
-                  Text(
-                    '发现一个好奇心满满的今天',
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontSize: 15),
-                  ),
-                ],
-              ),
             ),
           ],
         );
@@ -288,9 +292,8 @@ class _HomeHeader extends StatelessWidget {
                 Text(
                   countLabel,
                   key: const Key('首页视频总数'),
-                  style: Theme.of(
-                    context,
-                  ).textTheme.labelLarge?.copyWith(color: AppColors.tealDark),
+                  style: Theme.of(context).textTheme.labelLarge
+                      ?.copyWith(color: AppColors.tealDark),
                 ),
                 const SizedBox(width: 6),
                 _buildRefreshButton(),
@@ -330,9 +333,8 @@ class _HomeHeader extends StatelessWidget {
                               Text(
                                 countLabel,
                                 key: const Key('首页视频总数'),
-                                style: Theme.of(
-                                  context,
-                                ).textTheme.labelLarge?.copyWith(color: AppColors.tealDark),
+                                style: Theme.of(context).textTheme.labelLarge
+                                    ?.copyWith(color: AppColors.tealDark),
                               ),
                             ],
                           ),
@@ -462,10 +464,8 @@ class _FolderHeader extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
               child: Text(
                 '${group.items.length} 个视频',
-                style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                  color: AppColors.ink,
-                  fontWeight: FontWeight.w800,
-                ),
+                style: Theme.of(context).textTheme.labelMedium
+                    ?.copyWith(color: AppColors.ink, fontWeight: FontWeight.w800),
               ),
             ),
           );
@@ -689,10 +689,8 @@ class _ViewMoreCard extends StatelessWidget {
                       SizedBox(height: compact ? 5 : 7),
                       Text(
                         '还有 $remainingCount 个视频',
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: AppColors.tealDark,
-                          fontWeight: FontWeight.w700,
-                        ),
+                        style: Theme.of(context).textTheme.bodyMedium
+                            ?.copyWith(color: AppColors.tealDark, fontWeight: FontWeight.w700),
                       ),
                       SizedBox(height: compact ? 10 : 14),
                       Icon(

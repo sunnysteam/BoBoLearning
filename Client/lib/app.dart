@@ -1,11 +1,16 @@
 import 'package:bobo_learning/config/app_config.dart';
+import 'package:bobo_learning/data/repositories/app_update_repository_impl.dart';
 import 'package:bobo_learning/data/repositories/video_repository_impl.dart';
+import 'package:bobo_learning/data/services/app_update_api_service.dart';
 import 'package:bobo_learning/data/services/video_api_service.dart';
 import 'package:bobo_learning/ui/core/app_theme.dart';
 import 'package:bobo_learning/ui/features/home/view_models/home_view_model.dart';
 import 'package:bobo_learning/ui/features/home/views/home_page.dart';
 import 'package:bobo_learning/ui/features/player/services/playback_controller.dart';
 import 'package:bobo_learning/ui/features/portal/views/portal_page.dart';
+import 'package:bobo_learning/ui/features/update/services/app_update_platform.dart';
+import 'package:bobo_learning/ui/features/update/view_models/app_update_view_model.dart';
+import 'package:bobo_learning/ui/features/update/views/app_update_prompt_host.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
@@ -19,14 +24,16 @@ class BoBoLearningApp extends StatefulWidget {
   State<BoBoLearningApp> createState() => _BoBoLearningAppState();
 }
 
-class _BoBoLearningAppState extends State<BoBoLearningApp> {
+class _BoBoLearningAppState extends State<BoBoLearningApp> with WidgetsBindingObserver {
   late final http.Client _httpClient;
   late final HomeViewModel _homeViewModel;
+  late final AppUpdateViewModel _appUpdateViewModel;
   final PlaybackControllerFactory _playbackControllerFactory = const VideoPlayerControllerFactory();
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _httpClient = http.Client();
     final VideoApiService apiService = VideoApiService(
       client: _httpClient,
@@ -35,10 +42,27 @@ class _BoBoLearningAppState extends State<BoBoLearningApp> {
     _homeViewModel = HomeViewModel(
       repository: VideoRepositoryImpl(apiService: apiService, config: widget.config),
     );
+    _appUpdateViewModel = AppUpdateViewModel(
+      repository: AppUpdateRepositoryImpl(
+        apiService: AppUpdateApiService(client: _httpClient, apiBaseUri: widget.config.apiBaseUri),
+        config: widget.config,
+      ),
+      platform: const MethodChannelAppUpdatePlatform(),
+    );
+    _appUpdateViewModel.start();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _appUpdateViewModel.onAppResumed();
+    }
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _appUpdateViewModel.dispose();
     _homeViewModel.dispose();
     _httpClient.close();
     super.dispose();
@@ -50,11 +74,14 @@ class _BoBoLearningAppState extends State<BoBoLearningApp> {
       debugShowCheckedModeBanner: false,
       title: '菠萝乐园',
       theme: AppTheme.light,
-      home: PortalPage(
-        earlyLearningPageBuilder: (_) => HomePage(
-          showBackButton: true,
-          playbackControllerFactory: _playbackControllerFactory,
-          viewModel: _homeViewModel,
+      home: AppUpdatePromptHost(
+        viewModel: _appUpdateViewModel,
+        child: PortalPage(
+          earlyLearningPageBuilder: (_) => HomePage(
+            showBackButton: true,
+            playbackControllerFactory: _playbackControllerFactory,
+            viewModel: _homeViewModel,
+          ),
         ),
       ),
     );

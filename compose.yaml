@@ -5,7 +5,7 @@ services:
     build:
       context: .
       dockerfile: Service/Dockerfile
-    image: bobo-learning-service:0.1.0
+    image: bobo-learning-service:0.2.2
     ports:
       - "${BOBO_API_PORT:-5171}:8080"
     volumes:
@@ -18,10 +18,17 @@ services:
       - type: volume
         source: cover-cache
         target: /app/cover-cache
+      - type: bind
+        source: ${BOBO_UPDATE_HOST_PATH:-./Service/updates}
+        target: /app/updates
+        read_only: true
+        bind:
+          create_host_path: false
     environment:
       BOBO_BIND: 0.0.0.0:8080
       BOBO_MEDIA_DIR: /app/media
       BOBO_COVER_CACHE_DIR: /app/cover-cache
+      BOBO_UPDATE_DIR: /app/updates
       BOBO_DEFAULT_COVER_PATH: /app/default-cover.png
       BOBO_FFMPEG_BIN: ffmpeg
       BOBO_COVER_CAPTURE_SECS: ${BOBO_COVER_CAPTURE_SECS:-3}
@@ -45,7 +52,9 @@ services:
     build:
       context: .
       dockerfile: Client/Dockerfile
-    image: bobo-learning-client:0.1.0
+      args:
+        API_BASE_URL: ${BOBO_PUBLIC_API_BASE_URL:-https://wx.jiayuntong.com:5172/server/}
+    image: bobo-learning-client:0.2.4
     depends_on:
       service:
         condition: service_healthy

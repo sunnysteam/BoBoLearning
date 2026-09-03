@@ -3,6 +3,7 @@ mod config;
 mod cover;
 mod discovery;
 mod monitor;
+mod update;
 
 use std::{process::ExitCode, sync::Arc};
 
@@ -63,15 +64,19 @@ async fn run() -> Result<()> {
         stop_rx,
     );
 
-    let app = build_router(AppState { catalog: store });
+    let app = build_router(AppState {
+        catalog: store,
+        update_dir: config.update_dir.clone(),
+    });
     let listener = tokio::net::TcpListener::bind(config.bind_addr)
         .await
         .with_context(|| format!("无法监听地址 {}", config.bind_addr))?;
     info!(
-        "菠萝乐园服务已启动：http://{}，媒体目录={}，自动封面缓存={}",
+        "菠萝乐园服务已启动：http://{}，媒体目录={}，自动封面缓存={}，升级包目录={}",
         config.bind_addr,
         config.media_dir.display(),
-        config.cover_cache_dir.display()
+        config.cover_cache_dir.display(),
+        config.update_dir.display()
     );
 
     let shutdown_tx = stop_tx.clone();

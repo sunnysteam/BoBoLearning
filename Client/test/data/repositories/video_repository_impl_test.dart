@@ -26,7 +26,7 @@ void main() {
         headers: {'content-type': 'application/json; charset=utf-8'},
       );
     });
-    final config = AppConfig(apiBaseUri: Uri.parse('https://learning.example/api/v1/'));
+    final config = AppConfig(apiBaseUri: Uri.parse('https://learning.example/server/api/v1/'));
     final repository = VideoRepositoryImpl(
       apiService: VideoApiService(client: client, apiBaseUri: config.apiBaseUri),
       config: config,
@@ -34,8 +34,14 @@ void main() {
 
     final result = await repository.fetchVideos();
 
-    expect(result.single.coverUri, Uri.parse('https://learning.example/api/v1/videos/1/cover'));
-    expect(result.single.streamUri, Uri.parse('https://learning.example/api/v1/videos/1/stream'));
+    expect(
+      result.single.coverUri,
+      Uri.parse('https://learning.example/server/api/v1/videos/1/cover'),
+    );
+    expect(
+      result.single.streamUri,
+      Uri.parse('https://learning.example/server/api/v1/videos/1/stream'),
+    );
     expect(result.single.folderPath, '颜色启蒙');
   });
 }

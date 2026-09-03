@@ -16,9 +16,17 @@ void main() {
     expect(find.text('菠萝乐园'), findsOneWidget);
     expect(find.byKey(const Key('菠萝首页品牌图标')), findsOneWidget);
     expect(find.text('今天想去哪里玩？'), findsOneWidget);
+    expect(find.text('选一个喜欢的小世界，开启今天的快乐发现。'), findsNothing);
+    final promptFinder = find.byKey(const Key('菠萝首页主标题'));
+    final prompt = tester.widget<Text>(promptFinder);
+    final bodyFontSize = Theme.of(tester.element(promptFinder)).textTheme.bodyLarge?.fontSize;
+    expect(prompt.style?.fontSize, bodyFontSize);
     expect(find.byKey(const Key('菠萝首页分类-菠萝早教')), findsOneWidget);
     expect(find.byKey(const Key('菠萝首页分类-菠萝视频')), findsOneWidget);
     expect(find.byKey(const Key('菠萝首页分类-菠萝相册')), findsOneWidget);
+    expect(find.byKey(const Key('菠萝首页分类图标-菠萝早教')), findsOneWidget);
+    expect(find.byKey(const Key('菠萝首页分类图标-菠萝视频')), findsOneWidget);
+    expect(find.byKey(const Key('菠萝首页分类图标-菠萝相册')), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -31,6 +39,9 @@ void main() {
 
     expect(find.byKey(const Key('首页滚动区域')), findsOneWidget);
     expect(find.byKey(const Key('菠萝早教返回首页按钮')), findsOneWidget);
+    expect(find.byKey(const Key('菠萝早教子页面标题')), findsOneWidget);
+    expect(find.byKey(const Key('菠萝早教品牌图标')), findsNothing);
+    expect(find.text('发现一个好奇心满满的今天'), findsNothing);
 
     await tester.tap(find.byKey(const Key('菠萝早教返回首页按钮')));
     await tester.pumpAndSettle();
@@ -49,10 +60,32 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('菠萝视频子页面')), findsOneWidget);
+    expect(find.byKey(const Key('菠萝视频子页面标题')), findsOneWidget);
+    expect(find.text('菠萝视频'), findsOneWidget);
     expect(find.text('欢乐小舞台正在布置'), findsOneWidget);
     expect(find.byKey(const Key('菠萝视频返回按钮')), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('菠萝视频返回按钮')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('菠萝首页滚动区域')), findsOneWidget);
+  });
+
+  testWidgets('菠萝相册子页面补充标题并保留返回路径', (tester) async {
+    await _setViewSize(tester, const Size(390, 844));
+    await tester.pumpWidget(_buildTestApp());
+
+    final albumEntry = find.byKey(const Key('菠萝首页分类-菠萝相册'));
+    await tester.ensureVisible(albumEntry);
+    await tester.tap(albumEntry);
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('菠萝相册子页面')), findsOneWidget);
+    expect(find.byKey(const Key('菠萝相册子页面标题')), findsOneWidget);
+    expect(find.text('菠萝相册'), findsOneWidget);
+    expect(find.text('相册星球正在收集笑脸'), findsOneWidget);
+    expect(find.byKey(const Key('菠萝相册返回按钮')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('菠萝相册返回按钮')));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('菠萝首页滚动区域')), findsOneWidget);
   });

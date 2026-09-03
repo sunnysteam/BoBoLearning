@@ -22,6 +22,7 @@ docker compose down
 - Flutter Web 与 Rust Service 分别构建并运行在 `client`、`service` 两个容器中。
 - Client 使用 Nginx 托管 Web，并把同源 `/api`、`/healthz` 代理到 Service。
 - 宿主机 `Service/media` 只读映射到容器 `/app/media`，媒体不会进入镜像。
+- 宿主机 `Service/updates` 只读映射到容器 `/app/updates`，升级 APK 不会进入镜像。
 - 自动封面保存在 Docker 命名卷 `/app/cover-cache`，不会修改宿主机媒体文件。
 - 两个容器均以非 root 用户运行，根文件系统只读，并禁用新增权限。
 - 容器每 10 秒进行一次兜底扫描；文件系统事件正常时会更快更新。
@@ -62,11 +63,15 @@ docker compose logs --follow service
 ```dotenv
 BOBO_WEB_PORT=5170
 BOBO_API_PORT=5171
+BOBO_PUBLIC_API_BASE_URL=https://wx.jiayuntong.com:5172/server/
 BOBO_MEDIA_HOST_PATH=G:/BoBoMedia
+BOBO_UPDATE_HOST_PATH=G:/BoBoUpdates
 BOBO_COVER_CAPTURE_SECS=3
 ```
 
-`BOBO_MEDIA_HOST_PATH` 必须指向已经存在的目录。Compose 不会替你创建目录，路径错误会直接启动失败，从而避免误挂载空目录。Windows Docker Desktop 需允许 Docker 访问该盘符。
+APK 与 Web 的默认正式服务根地址均为 `https://wx.jiayuntong.com:5172/server/`，客户端会自动补齐 `api/v1/`。外层 Nginx 的 `/server/` 会去掉此前缀并转发到 Rust Service。`BOBO_PUBLIC_API_BASE_URL` 可在构建 Web 镜像时覆盖该地址。
+
+`BOBO_MEDIA_HOST_PATH` 和 `BOBO_UPDATE_HOST_PATH` 必须指向已经存在的目录。Compose 不会替你创建目录，路径错误会直接启动失败，从而避免误挂载空目录。Windows Docker Desktop 需允许 Docker 访问对应盘符。
 
 自动封面缓存由 Compose 命名卷 `cover-cache` 持久化。执行普通的 `docker compose down` 不会删除缓存；只有显式执行 `docker compose down --volumes` 才会删除，之后服务会重新截取。
 
@@ -87,6 +92,30 @@ C:\Users\yxb\fvm\default\bin\flutter.bat run --dart-define=API_BASE_URL=http://1
 
 Android Debug 允许局域网 HTTP；Release 部署应通过 HTTPS 访问。
 
+## Android 静默升级
+
+Android 应用会在启动和从后台恢复时检查 `GET /api/v1/app-updates/latest`。发现更高的 `versionCode` 后，交给 Android 系统下载服务在后台下载；应用进程退出、网络切换或系统重启后仍可恢复任务。下载完成后会依次校验文件长度、SHA-256、应用包名、构建号和签名，全部通过才显示“新版本已经准备好”弹窗。
+
+发布新版本时，先提升 `Client/pubspec.yaml` 的 `version`，然后在仓库根目录执行：
+
+```powershell
+.\scripts\publish-android-update.ps1 `
+  -ReleaseNote @('新增静默升级', '优化播放稳定性')
+```
+
+脚本默认把 `https://wx.jiayuntong.com:5172/server/` 写入 APK；本地联调仍可通过 `-ApiBaseUrl` 覆盖。脚本会构建 Android Release APK，将版本化安装包写入 `Service/updates`，计算 SHA-256，并最后原子替换 `latest.json`。升级目录使用 bind mount，发布新包不需要重建 Service 镜像；接口确认命令：
+
+```powershell
+Invoke-RestMethod http://localhost:5171/api/v1/app-updates/latest
+Invoke-RestMethod https://wx.jiayuntong.com:5172/server/api/v1/app-updates/latest
+```
+
+本地 HTTP 验收必须显式添加 `-AllowInsecureHttp`；正式发布只允许 HTTPS。普通 Android 应用不能绕过系统安装确认：首次点击“重启并安装”时，Android 8 及以上可能要求开启“允许来自此来源的应用”，返回后会继续打开系统安装器。
+
+当前项目的 Release 构建仍使用调试签名，只适合本机链路验收。同一设备上的升级包必须与已安装版本使用完全相同的签名；正式投放前必须改用受保护的固定发布密钥并妥善备份，否则无法覆盖升级。
+
+已发布的版本号对应的 APK 不允许被不同内容覆盖；发布脚本发现同版本产物哈希变化时会终止，并要求先提升 `Client/pubspec.yaml` 的版本号，避免客户端缓存旧包。
+
 ## 本地开发
 
 先安装 FFmpeg 并确保 `ffmpeg` 位于 `PATH`。Flutter Web 与 Rust Service 本地开发时分别启动：
@@ -101,7 +130,7 @@ $env:BOBO_BIND='0.0.0.0:5171'
 cargo run
 ```
 
-Service 容器内部默认监听 `0.0.0.0:8080`，本地媒体目录为 `Service/media`，自动封面缓存为 `Service/cover-cache`。可通过 `BOBO_BIND`、`BOBO_MEDIA_DIR`、`BOBO_COVER_CACHE_DIR`、`BOBO_DEFAULT_COVER_PATH`、`BOBO_FFMPEG_BIN`、`BOBO_COVER_CAPTURE_SECS`、`BOBO_SCAN_DEBOUNCE_MS` 和 `BOBO_SCAN_INTERVAL_SECS` 覆盖。
+Service 容器内部默认监听 `0.0.0.0:8080`，本地媒体目录为 `Service/media`，自动封面缓存为 `Service/cover-cache`，升级包目录为 `Service/updates`。可通过 `BOBO_BIND`、`BOBO_MEDIA_DIR`、`BOBO_COVER_CACHE_DIR`、`BOBO_UPDATE_DIR`、`BOBO_DEFAULT_COVER_PATH`、`BOBO_FFMPEG_BIN`、`BOBO_COVER_CAPTURE_SECS`、`BOBO_SCAN_DEBOUNCE_MS` 和 `BOBO_SCAN_INTERVAL_SECS` 覆盖。
 
 ## 验收命令
 
@@ -131,6 +160,7 @@ Invoke-RestMethod http://localhost:5170/healthz
 Invoke-RestMethod http://localhost:5170/api/v1/videos
 Invoke-RestMethod http://localhost:5171/healthz
 Invoke-RestMethod http://localhost:5171/api/v1/videos
+Invoke-WebRequest http://localhost:5171/api/v1/app-updates/latest -SkipHttpErrorCheck
 ```
 
 完整产品范围、接口契约和验收标准见 [需求说明.md](需求说明.md)。

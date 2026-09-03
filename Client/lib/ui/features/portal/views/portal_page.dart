@@ -54,29 +54,11 @@ class PortalPage extends StatelessWidget {
                   SliverPadding(
                     padding: EdgeInsets.fromLTRB(sidePadding, 0, sidePadding, 18),
                     sliver: SliverToBoxAdapter(
-                      child: Semantics(
-                        header: true,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              '今天想去哪里玩？',
-                              key: const Key('菠萝首页主标题'),
-                              style: Theme.of(context).textTheme.displaySmall?.copyWith(
-                                fontSize: compact ? 30 : 42,
-                                height: 1.12,
-                              ),
-                            ),
-                            const SizedBox(height: 9),
-                            Text(
-                              '选一个喜欢的小世界，开启今天的快乐发现。',
-                              style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                                color: AppColors.mutedInk,
-                                fontSize: compact ? 16 : 18,
-                              ),
-                            ),
-                          ],
-                        ),
+                      child: Text(
+                        '今天想去哪里玩？',
+                        key: const Key('菠萝首页主标题'),
+                        style: Theme.of(context).textTheme.bodyLarge
+                            ?.copyWith(color: AppColors.ink),
                       ),
                     ),
                   ),
@@ -175,10 +157,8 @@ class _PortalHeader extends StatelessWidget {
             children: [
               Text(
                 '菠萝乐园',
-                style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                  fontSize: compact ? 27 : 32,
-                  fontWeight: FontWeight.w900,
-                ),
+                style: Theme.of(context).textTheme.headlineMedium
+                    ?.copyWith(fontSize: compact ? 27 : 32, fontWeight: FontWeight.w900),
               ),
               const SizedBox(height: 3),
               Text(
@@ -338,19 +318,16 @@ class _CompactCategoryContent extends StatelessWidget {
             children: [
               Text(
                 section.title,
-                style: Theme.of(
-                  context,
-                ).textTheme.titleLarge?.copyWith(fontSize: 23, fontWeight: FontWeight.w900),
+                style: Theme.of(context).textTheme.titleLarge
+                    ?.copyWith(fontSize: 23, fontWeight: FontWeight.w900),
               ),
               const SizedBox(height: 7),
               Text(
                 section.description,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: AppColors.ink.withValues(alpha: 0.76),
-                  fontSize: 15,
-                ),
+                style: Theme.of(context).textTheme.bodyMedium
+                    ?.copyWith(color: AppColors.ink.withValues(alpha: 0.76), fontSize: 15),
               ),
               const SizedBox(height: 10),
               _ExploreLabel(accent: section.accent),
@@ -376,19 +353,16 @@ class _ExpandedCategoryContent extends StatelessWidget {
         const Spacer(),
         Text(
           section.title,
-          style: Theme.of(
-            context,
-          ).textTheme.headlineMedium?.copyWith(fontSize: 27, fontWeight: FontWeight.w900),
+          style: Theme.of(context).textTheme.headlineMedium
+              ?.copyWith(fontSize: 27, fontWeight: FontWeight.w900),
         ),
         const SizedBox(height: 7),
         Text(
           section.description,
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
-          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-            color: AppColors.ink.withValues(alpha: 0.76),
-            fontSize: 15,
-          ),
+          style: Theme.of(context).textTheme.bodyMedium
+              ?.copyWith(color: AppColors.ink.withValues(alpha: 0.76), fontSize: 15),
         ),
         const SizedBox(height: 14),
         _ExploreLabel(accent: section.accent),
@@ -434,7 +408,26 @@ class _CategoryIllustration extends StatelessWidget {
               ),
               child: SizedBox.square(
                 dimension: size * 0.62,
-                child: Icon(section.icon, color: Colors.white, size: size * 0.34),
+                child: switch (section.kind) {
+                  _PortalSectionKind.earlyLearning => Icon(
+                    Icons.auto_stories_rounded,
+                    key: Key('菠萝首页分类图标-${section.title}'),
+                    color: Colors.white,
+                    size: size * 0.34,
+                  ),
+                  _PortalSectionKind.videos => Icon(
+                    Icons.smart_display_rounded,
+                    key: Key('菠萝首页分类图标-${section.title}'),
+                    color: Colors.white,
+                    size: size * 0.34,
+                  ),
+                  _PortalSectionKind.albums => Icon(
+                    Icons.photo_library_rounded,
+                    key: Key('菠萝首页分类图标-${section.title}'),
+                    color: Colors.white,
+                    size: size * 0.34,
+                  ),
+                },
               ),
             ),
           ),
@@ -497,16 +490,26 @@ class _PreparingSectionPage extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                IconButton(
-                  key: Key('${section.title}返回按钮'),
-                  tooltip: '返回菠萝首页',
-                  onPressed: () => Navigator.of(context).pop(),
-                  style: IconButton.styleFrom(
-                    backgroundColor: AppColors.paper.withValues(alpha: 0.94),
-                    foregroundColor: AppColors.ink,
-                    side: BorderSide(color: section.accent.withValues(alpha: 0.16)),
-                  ),
-                  icon: const Icon(Icons.arrow_back_rounded),
+                Row(
+                  children: [
+                    IconButton(
+                      key: Key('${section.title}返回按钮'),
+                      tooltip: '返回菠萝首页',
+                      onPressed: () => Navigator.of(context).pop(),
+                      style: IconButton.styleFrom(
+                        backgroundColor: AppColors.paper.withValues(alpha: 0.94),
+                        foregroundColor: AppColors.ink,
+                        side: BorderSide(color: section.accent.withValues(alpha: 0.16)),
+                      ),
+                      icon: const Icon(Icons.arrow_back_rounded),
+                    ),
+                    const SizedBox(width: 12),
+                    Text(
+                      section.title,
+                      key: Key('${section.title}子页面标题'),
+                      style: Theme.of(context).textTheme.headlineMedium,
+                    ),
+                  ],
                 ),
                 Expanded(
                   child: Center(
@@ -528,9 +531,8 @@ class _PreparingSectionPage extends StatelessWidget {
                               Text(
                                 section.preparingMessage,
                                 textAlign: TextAlign.center,
-                                style: Theme.of(
-                                  context,
-                                ).textTheme.bodyLarge?.copyWith(color: AppColors.mutedInk),
+                                style: Theme.of(context).textTheme.bodyLarge
+                                    ?.copyWith(color: AppColors.mutedInk),
                               ),
                               const SizedBox(height: 22),
                               DecoratedBox(
@@ -543,9 +545,8 @@ class _PreparingSectionPage extends StatelessWidget {
                                   padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 11),
                                   child: Text(
                                     '小世界正在准备中',
-                                    style: Theme.of(
-                                      context,
-                                    ).textTheme.labelLarge?.copyWith(color: AppColors.ink),
+                                    style: Theme.of(context).textTheme.labelLarge
+                                        ?.copyWith(color: AppColors.ink),
                                   ),
                                 ),
                               ),
@@ -575,7 +576,6 @@ class _PortalSection {
     required this.description,
     required this.preparingTitle,
     required this.preparingMessage,
-    required this.icon,
     required this.surface,
     required this.accent,
   });
@@ -586,7 +586,6 @@ class _PortalSection {
   final String description;
   final String preparingTitle;
   final String preparingMessage;
-  final IconData icon;
   final Color surface;
   final Color accent;
 }
@@ -599,7 +598,6 @@ const _sections = <_PortalSection>[
     description: '听故事、学知识，让好奇心快乐长大',
     preparingTitle: '',
     preparingMessage: '',
-    icon: Icons.auto_stories_rounded,
     surface: AppColors.mintMist,
     accent: AppColors.teal,
   ),
@@ -610,7 +608,6 @@ const _sections = <_PortalSection>[
     description: '打开欢乐小舞台，发现更多有趣画面',
     preparingTitle: '欢乐小舞台正在布置',
     preparingMessage: '菠萝视频会在这里和你见面，敬请期待新的快乐内容。',
-    icon: Icons.smart_display_rounded,
     surface: AppColors.peachMist,
     accent: AppColors.coral,
   ),
@@ -621,7 +618,6 @@ const _sections = <_PortalSection>[
     description: '收藏闪亮瞬间，把每份快乐好好珍藏',
     preparingTitle: '相册星球正在收集笑脸',
     preparingMessage: '菠萝相册会在这里珍藏美好瞬间，很快就能一起翻看啦。',
-    icon: Icons.photo_library_rounded,
     surface: AppColors.skyMist,
     accent: AppColors.lavender,
   ),

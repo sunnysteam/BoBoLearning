@@ -28,7 +28,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     && test "${install_succeeded}" = "1" \
     && groupadd --system --gid 10001 bobo \
     && useradd --system --uid 10001 --gid bobo --home-dir /nonexistent --shell /usr/sbin/nologin bobo \
-    && mkdir --parents /app/cover-cache /app/media \
+    && mkdir --parents /app/cover-cache /app/media /app/updates \
     && chown --recursive bobo:bobo /app
 
 COPY --from=builder --chown=bobo:bobo \
@@ -38,6 +38,7 @@ COPY --chown=bobo:bobo Service/assets/default-cover.png /app/default-cover.png
 ENV BOBO_BIND=0.0.0.0:8080 \
     BOBO_MEDIA_DIR=/app/media \
     BOBO_COVER_CACHE_DIR=/app/cover-cache \
+    BOBO_UPDATE_DIR=/app/updates \
     BOBO_DEFAULT_COVER_PATH=/app/default-cover.png \
     BOBO_FFMPEG_BIN=ffmpeg \
     BOBO_COVER_CAPTURE_SECS=3 \

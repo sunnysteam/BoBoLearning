@@ -1,7 +1,7 @@
 name: bobo_learning
 description: 菠萝乐园儿童内容客户端
 publish_to: none
-version: 0.1.0+1
+version: 0.2.4+6
 
 environment:
   sdk: ^3.13.2

@@ -15,6 +15,7 @@ pub struct AppConfig {
     pub bind_addr: SocketAddr,
     pub media_dir: PathBuf,
     pub cover_cache_dir: PathBuf,
+    pub update_dir: PathBuf,
     pub default_cover_path: PathBuf,
     pub ffmpeg_bin: OsString,
     pub cover_capture_seconds: u64,
@@ -34,6 +35,8 @@ impl AppConfig {
         let media_dir = env_path("BOBO_MEDIA_DIR").unwrap_or_else(|| manifest_dir.join("media"));
         let cover_cache_dir =
             env_path("BOBO_COVER_CACHE_DIR").unwrap_or_else(|| manifest_dir.join("cover-cache"));
+        let update_dir =
+            env_path("BOBO_UPDATE_DIR").unwrap_or_else(|| manifest_dir.join("updates"));
         let default_cover_path = env_path("BOBO_DEFAULT_COVER_PATH")
             .unwrap_or_else(|| manifest_dir.join("assets").join("default-cover.png"));
         let ffmpeg_bin = env::var_os("BOBO_FFMPEG_BIN")
@@ -53,6 +56,7 @@ impl AppConfig {
             bind_addr,
             media_dir,
             cover_cache_dir,
+            update_dir,
             default_cover_path,
             ffmpeg_bin,
             cover_capture_seconds,
@@ -66,6 +70,12 @@ impl AppConfig {
     fn validate(&self) -> Result<()> {
         if !self.media_dir.is_dir() {
             bail!("媒体目录不存在或不是文件夹：{}", self.media_dir.display());
+        }
+        if !self.update_dir.is_dir() {
+            bail!(
+                "升级包目录不存在或不是文件夹：{}",
+                self.update_dir.display()
+            );
         }
 
         fs::create_dir_all(&self.cover_cache_dir).with_context(|| {

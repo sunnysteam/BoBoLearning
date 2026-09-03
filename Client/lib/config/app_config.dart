@@ -1,22 +1,18 @@
-import 'package:flutter/foundation.dart';
-
 /// 客户端运行配置。
 class AppConfig {
   const AppConfig({required this.apiBaseUri});
 
   factory AppConfig.fromEnvironment() {
     const configuredBaseUrl = String.fromEnvironment('API_BASE_URL');
-    if (configuredBaseUrl.trim().isNotEmpty) {
-      return AppConfig(apiBaseUri: _normalizeApiBase(configuredBaseUrl));
-    }
-
-    if (kIsWeb) {
-      return AppConfig(apiBaseUri: Uri.base.resolve('/api/v1/'));
-    }
-
-    // Android 模拟器默认通过 10.0.2.2 访问宿主机；真机必须使用 dart-define 指定地址。
-    return AppConfig(apiBaseUri: Uri.parse('http://10.0.2.2:8080/api/v1/'));
+    final apiServerUrl = configuredBaseUrl.trim().isEmpty ? defaultApiServerUrl : configuredBaseUrl;
+    return AppConfig.fromApiServerUrl(apiServerUrl);
   }
+
+  factory AppConfig.fromApiServerUrl(String value) {
+    return AppConfig(apiBaseUri: _normalizeApiBase(value));
+  }
+
+  static const defaultApiServerUrl = 'https://wx.jiayuntong.com:5172/server/';
 
   final Uri apiBaseUri;
 
@@ -28,8 +24,14 @@ class AppConfig {
     if (parsed.hasScheme) {
       return parsed;
     }
+    if (parsed.path.startsWith(_versionedApiRootPath)) {
+      final relative = parsed.replace(path: parsed.path.substring(_versionedApiRootPath.length));
+      return apiBaseUri.resolveUri(relative);
+    }
     return apiBaseUri.resolve(value);
   }
+
+  static const _versionedApiRootPath = '/api/v1/';
 
   static Uri _normalizeApiBase(String value) {
     final uri = Uri.tryParse(value.trim());
