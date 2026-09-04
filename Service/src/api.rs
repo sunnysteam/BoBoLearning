@@ -5,13 +5,13 @@ use axum::{
     body::Body,
     extract::{Path, Request, State},
     http::{
-        HeaderValue, Method, StatusCode,
+        HeaderName, HeaderValue, Method, StatusCode,
         header::{
             ACCEPT_RANGES, CACHE_CONTROL, CONTENT_DISPOSITION, CONTENT_LENGTH, CONTENT_RANGE,
             CONTENT_TYPE, RANGE,
         },
     },
-    response::{IntoResponse, Response},
+    response::{IntoResponse, Redirect, Response},
     routing::{any, get},
 };
 use serde::Serialize;
@@ -22,6 +22,7 @@ use tower_http::{
 };
 
 use crate::discovery::{CatalogStore, VideoEntry};
+use crate::hls::HlsManager;
 use crate::update::UpdateManifest;
 use tracing::warn;
 
@@ -29,6 +30,7 @@ use tracing::warn;
 #[derive(Clone)]
 pub struct AppState {
     pub catalog: CatalogStore,
+    pub hls: HlsManager,
     pub update_dir: PathBuf,
 }
 
@@ -50,6 +52,8 @@ struct VideoResponse {
     folder_path: String,
     cover_url: String,
     stream_url: String,
+    hls_url: Option<String>,
+    hls_status: &'static str,
 }
 
 #[derive(Serialize)]
@@ -69,6 +73,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/videos", get(list_videos))
         .route("/videos/{id}/cover", get(serve_cover))
         .route("/videos/{id}/stream", get(serve_stream))
+        .route("/videos/{id}/hls/{version}/{file}", get(serve_hls_asset))
         .route("/app-updates/latest", get(latest_update))
         .route(
             "/app-updates/packages/{file_name}",
@@ -97,17 +102,29 @@ async fn health() -> Json<HealthResponse> {
 
 async fn list_videos(State(state): State<AppState>) -> Json<VideoListResponse> {
     let snapshot = state.catalog.snapshot().await;
-    let items = snapshot
-        .entries()
-        .iter()
-        .map(|entry| VideoResponse {
+    let mut items = Vec::with_capacity(snapshot.len());
+    for entry in snapshot.entries() {
+        let hls = state.hls.snapshot(&entry.id).await;
+        let hls_url = hls
+            .version
+            .map(|version| format!("/api/v1/videos/{}/hls/{version}/index.m3u8", entry.id));
+        let stream_url = if entry.is_incoming() {
+            format!("/api/v1/videos/{}/stream", entry.id)
+        } else {
+            hls_url
+                .clone()
+                .unwrap_or_else(|| format!("/api/v1/videos/{}/stream", entry.id))
+        };
+        items.push(VideoResponse {
             id: entry.id.clone(),
             title: entry.title.clone(),
             folder_path: entry.folder_path.clone(),
             cover_url: format!("/api/v1/videos/{}/cover", entry.id),
-            stream_url: format!("/api/v1/videos/{}/stream", entry.id),
-        })
-        .collect();
+            stream_url,
+            hls_url,
+            hls_status: hls.status.as_str(),
+        });
+    }
     Json(VideoListResponse { items })
 }
 
@@ -119,7 +136,12 @@ async fn serve_cover(
     let Some(entry) = find_entry(&state, &id).await else {
         return video_not_found();
     };
-    serve_file(entry.cover_path.clone(), request, "public, max-age=3600").await
+    let cover_path = state
+        .hls
+        .resolve_cover_path(&id)
+        .await
+        .unwrap_or_else(|| entry.cover_path.clone());
+    serve_file(cover_path, request, "public, max-age=3600").await
 }
 
 async fn serve_stream(
@@ -130,7 +152,47 @@ async fn serve_stream(
     let Some(entry) = find_entry(&state, &id).await else {
         return video_not_found();
     };
-    serve_file(entry.video_path.clone(), request, "public, max-age=600").await
+    if let Some(video_path) = entry.video_path.clone()
+        && video_path.is_file()
+    {
+        let mut response = serve_file(video_path, request, "public, max-age=600").await;
+        // 让多层 Nginx 立即转发视频字节，避免旧版 HTTP/2 代理先缓冲大段 Range。
+        response.headers_mut().insert(
+            HeaderName::from_static("x-accel-buffering"),
+            HeaderValue::from_static("no"),
+        );
+        return response;
+    }
+
+    let hls = state.hls.snapshot(&id).await;
+    let version = hls.version.or_else(|| entry.published_hls_version.clone());
+    let Some(version) = version else {
+        return video_not_found();
+    };
+    Redirect::temporary(&format!("/api/v1/videos/{id}/hls/{version}/index.m3u8")).into_response()
+}
+
+async fn serve_hls_asset(
+    State(state): State<AppState>,
+    Path((id, version, file)): Path<(String, String, String)>,
+    request: Request,
+) -> Response {
+    if find_entry(&state, &id).await.is_none() {
+        return video_not_found();
+    }
+    let Some(path) = state.hls.resolve_asset_path(&id, &version, &file).await else {
+        return hls_asset_not_found();
+    };
+    let mut response = serve_file(path, request, "public, max-age=31536000, immutable").await;
+    let content_type = if file.ends_with(".m3u8") {
+        HeaderValue::from_static("application/vnd.apple.mpegurl")
+    } else if file.ends_with(".m4s") {
+        HeaderValue::from_static("video/iso.segment")
+    } else {
+        HeaderValue::from_static("video/mp4")
+    };
+    response.headers_mut().insert(CONTENT_TYPE, content_type);
+    response
 }
 
 async fn latest_update(State(state): State<AppState>) -> Response {
@@ -215,6 +277,14 @@ fn video_not_found() -> Response {
     error_response(StatusCode::NOT_FOUND, "video_not_found", "没有找到这个视频")
 }
 
+fn hls_asset_not_found() -> Response {
+    error_response(
+        StatusCode::NOT_FOUND,
+        "hls_asset_not_found",
+        "这个视频的流媒体资源还没有准备好",
+    )
+}
+
 fn update_not_found() -> Response {
     error_response(
         StatusCode::NOT_FOUND,
@@ -246,6 +316,7 @@ mod tests {
     };
     use http_body_util::BodyExt;
     use tempfile::{TempDir, tempdir};
+    use tokio::sync::watch;
 
     use crate::discovery::scan_media;
 
@@ -262,8 +333,13 @@ mod tests {
         let id = report.catalog.entries()[0].id.clone();
         let updates = root.path().join("updates");
         fs::create_dir_all(&updates).expect("升级包目录应创建成功");
+        let (_stop_tx, stop_rx) = watch::channel(false);
+        let (hls, _worker) =
+            HlsManager::start(root.path().join("hls-cache"), "ffmpeg".into(), 4, stop_rx)
+                .expect("HLS 管理器应创建成功");
         let app = build_router(AppState {
             catalog: CatalogStore::new(report.catalog),
+            hls,
             update_dir: updates,
         });
         (root, app, id)
@@ -293,6 +369,89 @@ mod tests {
         assert!(text.contains("颜色"));
         assert!(text.contains("\"folderPath\":\"课程\""));
         assert!(text.contains("coverUrl"));
+        assert!(text.contains("\"hlsUrl\":null"));
+        assert!(text.contains("\"hlsStatus\":\"pending\""));
+    }
+
+    #[tokio::test]
+    async fn 就绪_hls_清单与分片使用正确类型和长期缓存() {
+        let root = tempdir().expect("临时目录应创建成功");
+        let media = root.path().join("media");
+        fs::create_dir_all(media.join("课程")).expect("媒体目录应创建成功");
+        fs::write(media.join("课程/颜色.mp4"), b"0123456789").expect("视频应写入成功");
+        fs::write(media.join("课程/颜色.png"), b"cover").expect("封面应写入成功");
+        let report = scan_media(&media).expect("媒体扫描应成功");
+        let id = report.catalog.entries()[0].id.clone();
+        let catalog = CatalogStore::new(report.catalog);
+        let updates = root.path().join("updates");
+        fs::create_dir_all(&updates).expect("升级包目录应创建成功");
+        let (_stop_tx, stop_rx) = watch::channel(false);
+        let (hls, _worker) =
+            HlsManager::start(root.path().join("hls-cache"), "ffmpeg".into(), 4, stop_rx)
+                .expect("HLS 管理器应创建成功");
+        hls.publish_test_asset(&id, "version-1")
+            .await
+            .expect("测试 HLS 资源应发布成功");
+        let app = build_router(AppState {
+            catalog,
+            hls,
+            update_dir: updates,
+        });
+
+        let list_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/videos")
+                    .body(Body::empty())
+                    .expect("请求应创建成功"),
+            )
+            .await
+            .expect("请求应成功");
+        let list_body = list_response
+            .into_body()
+            .collect()
+            .await
+            .expect("响应体应读取成功")
+            .to_bytes();
+        let list_text = String::from_utf8(list_body.to_vec()).expect("响应应为 UTF-8");
+        assert!(list_text.contains("\"hlsStatus\":\"ready\""));
+        assert!(list_text.contains(&format!("/api/v1/videos/{id}/hls/version-1/index.m3u8")));
+
+        let playlist_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/v1/videos/{id}/hls/version-1/index.m3u8"))
+                    .body(Body::empty())
+                    .expect("请求应创建成功"),
+            )
+            .await
+            .expect("请求应成功");
+        assert_eq!(playlist_response.status(), StatusCode::OK);
+        assert_eq!(
+            playlist_response.headers()[CONTENT_TYPE],
+            "application/vnd.apple.mpegurl"
+        );
+        assert_eq!(
+            playlist_response.headers()[CACHE_CONTROL],
+            "public, max-age=31536000, immutable"
+        );
+
+        let segment_response = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/v1/videos/{id}/hls/version-1/seg_00000.m4s"))
+                    .body(Body::empty())
+                    .expect("请求应创建成功"),
+            )
+            .await
+            .expect("请求应成功");
+        assert_eq!(segment_response.status(), StatusCode::OK);
+        assert_eq!(
+            segment_response.headers()[CONTENT_TYPE],
+            "video/iso.segment"
+        );
     }
 
     #[tokio::test]
@@ -311,6 +470,7 @@ mod tests {
             .expect("请求应成功");
         assert_eq!(range_response.status(), StatusCode::PARTIAL_CONTENT);
         assert_eq!(range_response.headers()[CONTENT_RANGE], "bytes 2-5/10");
+        assert_eq!(range_response.headers()["x-accel-buffering"], "no");
         let body = range_response
             .into_body()
             .collect()

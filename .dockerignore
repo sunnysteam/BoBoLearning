@@ -20,6 +20,7 @@ Service/media/**
 Service/cover-cache/**
 !Service/cover-cache/.gitignore
 !Service/cover-cache/README.md
+Service/hls-cache/**
 Service/updates/**
 !Service/updates/.gitkeep
 *.log

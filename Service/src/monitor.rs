@@ -11,6 +11,7 @@ use tokio::{
 use tracing::{error, info, warn};
 
 use crate::discovery::{CatalogStore, MediaScanner, refresh_catalog};
+use crate::hls::HlsManager;
 
 enum WatchMessage {
     Event(Event),
@@ -21,6 +22,7 @@ enum WatchMessage {
 pub fn start_media_monitors(
     scanner: MediaScanner,
     store: CatalogStore,
+    hls: HlsManager,
     debounce: Duration,
     interval: Option<Duration>,
     scan_guard: Arc<Mutex<()>>,
@@ -29,6 +31,7 @@ pub fn start_media_monitors(
     let mut handles = vec![spawn_event_monitor(
         scanner.clone(),
         store.clone(),
+        hls.clone(),
         debounce,
         Arc::clone(&scan_guard),
         stop_rx.clone(),
@@ -36,7 +39,7 @@ pub fn start_media_monitors(
 
     if let Some(period) = interval {
         handles.push(spawn_periodic_scan(
-            scanner, store, period, scan_guard, stop_rx,
+            scanner, store, hls, period, scan_guard, stop_rx,
         ));
     }
     handles
@@ -45,6 +48,7 @@ pub fn start_media_monitors(
 fn spawn_event_monitor(
     scanner: MediaScanner,
     store: CatalogStore,
+    hls: HlsManager,
     debounce: Duration,
     scan_guard: Arc<Mutex<()>>,
     mut stop_rx: watch::Receiver<bool>,
@@ -130,6 +134,7 @@ fn spawn_event_monitor(
                 "文件事件",
             )
             .await;
+            hls.enqueue_entries(store.snapshot().await.entries()).await;
         }
         info!("媒体目录监听任务已停止");
     })
@@ -138,6 +143,7 @@ fn spawn_event_monitor(
 fn spawn_periodic_scan(
     scanner: MediaScanner,
     store: CatalogStore,
+    hls: HlsManager,
     period: Duration,
     scan_guard: Arc<Mutex<()>>,
     mut stop_rx: watch::Receiver<bool>,
@@ -159,6 +165,7 @@ fn spawn_periodic_scan(
                         Arc::clone(&scan_guard),
                         "周期任务",
                     ).await;
+                    hls.enqueue_entries(store.snapshot().await.entries()).await;
                 }
             }
         }

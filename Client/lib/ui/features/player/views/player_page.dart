@@ -4,12 +4,14 @@ import 'package:bobo_learning/domain/models/video_item.dart';
 import 'package:bobo_learning/ui/core/app_theme.dart';
 import 'package:bobo_learning/ui/features/player/services/playback_controller.dart';
 import 'package:bobo_learning/ui/features/player/view_models/player_view_model.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 class PlayerPage extends StatefulWidget {
-  const PlayerPage({required this.viewModel, super.key});
+  const PlayerPage({required this.viewModel, this.desktopNavigationEnabled = kIsWeb, super.key});
 
   final PlayerViewModel viewModel;
+  final bool desktopNavigationEnabled;
 
   @override
   State<PlayerPage> createState() => _PlayerPageState();
@@ -19,7 +21,9 @@ class _PlayerPageState extends State<PlayerPage> {
   late final PageController _pageController;
   PlaybackController? _observedController;
   Timer? _hideControlsTimer;
+  Timer? _slowBufferingTimer;
   bool _controlsVisible = true;
+  bool _isBufferingSlow = false;
   Duration? _dragPosition;
   DateTime? _lastBoundaryMessageAt;
 
@@ -39,6 +43,7 @@ class _PlayerPageState extends State<PlayerPage> {
   @override
   void dispose() {
     _hideControlsTimer?.cancel();
+    _slowBufferingTimer?.cancel();
     widget.viewModel.removeListener(_syncPlaybackController);
     _observedController?.removeListener(_handlePlaybackChanged);
     _pageController.dispose();
@@ -59,7 +64,11 @@ class _PlayerPageState extends State<PlayerPage> {
 
   void _handlePlaybackChanged() {
     final snapshot = _observedController?.snapshot;
-    if (!mounted || snapshot == null || _controlsVisible) {
+    if (!mounted || snapshot == null) {
+      return;
+    }
+    _syncSlowBufferingState(snapshot);
+    if (_controlsVisible) {
       return;
     }
     final shouldKeepControls =
@@ -69,6 +78,23 @@ class _PlayerPageState extends State<PlayerPage> {
     if (shouldKeepControls) {
       _hideControlsTimer?.cancel();
       setState(() => _controlsVisible = true);
+    }
+  }
+
+  void _syncSlowBufferingState(PlaybackSnapshot snapshot) {
+    final isBuffering = snapshot.isBuffering && snapshot.errorMessage == null;
+    if (isBuffering) {
+      _slowBufferingTimer ??= Timer(const Duration(seconds: 8), () {
+        if (mounted && (_observedController?.snapshot.isBuffering ?? false)) {
+          setState(() => _isBufferingSlow = true);
+        }
+      });
+      return;
+    }
+    _slowBufferingTimer?.cancel();
+    _slowBufferingTimer = null;
+    if (_isBufferingSlow) {
+      setState(() => _isBufferingSlow = false);
     }
   }
 
@@ -98,14 +124,29 @@ class _PlayerPageState extends State<PlayerPage> {
   }
 
   Future<void> _changePage(int index) async {
+    _slowBufferingTimer?.cancel();
+    _slowBufferingTimer = null;
     setState(() {
       _dragPosition = null;
       _controlsVisible = true;
+      _isBufferingSlow = false;
     });
     await widget.viewModel.changePage(index);
     if (mounted) {
       _scheduleControlsHide();
     }
+  }
+
+  Future<void> _navigateToPage(int index) async {
+    if (index < 0 || index >= widget.viewModel.items.length || !_pageController.hasClients) {
+      return;
+    }
+    _showControls();
+    await _pageController.animateToPage(
+      index,
+      duration: const Duration(milliseconds: 320),
+      curve: Curves.easeOutCubic,
+    );
   }
 
   bool _handleScrollNotification(ScrollNotification notification) {
@@ -138,39 +179,87 @@ class _PlayerPageState extends State<PlayerPage> {
         child: ListenableBuilder(
           listenable: widget.viewModel,
           builder: (context, _) {
-            return Stack(
-              fit: StackFit.expand,
-              children: [
-                NotificationListener<ScrollNotification>(
-                  onNotification: _handleScrollNotification,
-                  child: PageView.builder(
-                    key: const Key('纵向视频列表'),
-                    controller: _pageController,
-                    scrollDirection: Axis.vertical,
-                    itemCount: widget.viewModel.items.length,
-                    allowImplicitScrolling: true,
-                    onPageChanged: _changePage,
-                    itemBuilder: (context, index) {
-                      return _VideoPage(
-                        video: widget.viewModel.items[index],
-                        controller: widget.viewModel.controllerAt(index),
-                        onTap: _togglePlayback,
-                        onRetry: index == widget.viewModel.currentIndex
-                            ? widget.viewModel.retryCurrent
-                            : null,
-                      );
-                    },
-                  ),
-                ),
-                _buildTopControls(),
-                _buildBottomControls(),
-                _buildCenterFeedback(),
-              ],
+            return LayoutBuilder(
+              builder: (context, constraints) {
+                return Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    NotificationListener<ScrollNotification>(
+                      onNotification: _handleScrollNotification,
+                      child: PageView.builder(
+                        key: const Key('纵向视频列表'),
+                        controller: _pageController,
+                        scrollDirection: Axis.vertical,
+                        itemCount: widget.viewModel.items.length,
+                        allowImplicitScrolling: true,
+                        onPageChanged: _changePage,
+                        itemBuilder: (context, index) {
+                          return _VideoPage(
+                            video: widget.viewModel.items[index],
+                            controller: widget.viewModel.controllerAt(index),
+                            errorMessage: index == widget.viewModel.currentIndex
+                                ? widget.viewModel.currentErrorMessage
+                                : widget.viewModel.controllerAt(index)?.snapshot.errorMessage,
+                            onTap: _togglePlayback,
+                            onRetry: index == widget.viewModel.currentIndex
+                                ? widget.viewModel.retryCurrent
+                                : null,
+                          );
+                        },
+                      ),
+                    ),
+                    ..._buildDesktopNavigation(constraints.maxWidth),
+                    _buildTopControls(),
+                    _buildBottomControls(),
+                    _buildCenterFeedback(),
+                    _buildSoundPrompt(),
+                  ],
+                );
+              },
             );
           },
         ),
       ),
     );
+  }
+
+  List<Widget> _buildDesktopNavigation(double width) {
+    if (!widget.desktopNavigationEnabled || width < 1024) {
+      return const [];
+    }
+    final playerMargin = ((width - 1440) / 2).clamp(0, double.infinity);
+    final sideInset = (playerMargin - 84).clamp(24, double.infinity).toDouble();
+    final currentIndex = widget.viewModel.currentIndex;
+    return [
+      if (currentIndex > 0)
+        Positioned(
+          left: sideInset,
+          top: 0,
+          bottom: 0,
+          child: Center(
+            child: _DesktopNavigationButton(
+              key: const Key('上一个视频按钮'),
+              tooltip: '上一个视频',
+              icon: Icons.chevron_left_rounded,
+              onPressed: () => _navigateToPage(currentIndex - 1),
+            ),
+          ),
+        ),
+      if (currentIndex < widget.viewModel.items.length - 1)
+        Positioned(
+          right: sideInset,
+          top: 0,
+          bottom: 0,
+          child: Center(
+            child: _DesktopNavigationButton(
+              key: const Key('下一个视频按钮'),
+              tooltip: '下一个视频',
+              icon: Icons.chevron_right_rounded,
+              onPressed: () => _navigateToPage(currentIndex + 1),
+            ),
+          ),
+        ),
+    ];
   }
 
   Widget _buildTopControls() {
@@ -357,15 +446,20 @@ class _PlayerPageState extends State<PlayerPage> {
       listenable: controller,
       builder: (context, _) {
         final snapshot = controller.snapshot;
-        if (snapshot.isBuffering && snapshot.errorMessage == null) {
-          return const IgnorePointer(
-            child: Center(child: CircularProgressIndicator(color: AppColors.sunshine)),
+        final errorMessage = widget.viewModel.currentErrorMessage;
+        if (snapshot.isBuffering && errorMessage == null) {
+          return Center(
+            child: _BufferingFeedback(
+              isSlow: _isBufferingSlow,
+              onRetry: widget.viewModel.retryCurrent,
+            ),
           );
         }
-        if (snapshot.errorMessage != null) {
+        if (errorMessage != null) {
           return const SizedBox.shrink();
         }
-        if (snapshot.isPlaying && !widget.viewModel.requiresUserPlay) {
+        if (widget.viewModel.isAutoPlayPending ||
+            (snapshot.isPlaying && !widget.viewModel.requiresUserPlay)) {
           return const SizedBox.shrink();
         }
 
@@ -398,6 +492,32 @@ class _PlayerPageState extends State<PlayerPage> {
     );
   }
 
+  Widget _buildSoundPrompt() {
+    if (!widget.viewModel.isMutedForAutoPlay || !widget.viewModel.currentSnapshot.isPlaying) {
+      return const SizedBox.shrink();
+    }
+    return Positioned(
+      left: 0,
+      right: 0,
+      bottom: 86,
+      child: Center(
+        child: FilledButton.tonalIcon(
+          key: const Key('开启声音按钮'),
+          onPressed: widget.viewModel.enableSound,
+          style: FilledButton.styleFrom(
+            minimumSize: const Size(0, 48),
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+            backgroundColor: Colors.black.withValues(alpha: 0.68),
+            foregroundColor: Colors.white,
+            side: BorderSide(color: Colors.white.withValues(alpha: 0.22)),
+          ),
+          icon: const Icon(Icons.volume_up_rounded),
+          label: const Text('点击开启声音'),
+        ),
+      ),
+    );
+  }
+
   String _formatDuration(Duration duration) {
     final totalSeconds = duration.inSeconds.clamp(0, 359999);
     final hours = totalSeconds ~/ 3600;
@@ -414,12 +534,14 @@ class _VideoPage extends StatelessWidget {
   const _VideoPage({
     required this.video,
     required this.controller,
+    required this.errorMessage,
     required this.onTap,
     required this.onRetry,
   });
 
   final VideoItem video;
   final PlaybackController? controller;
+  final String? errorMessage;
   final VoidCallback onTap;
   final Future<void> Function()? onRetry;
 
@@ -437,8 +559,9 @@ class _VideoPage extends StatelessWidget {
                   listenable: controller!,
                   builder: (context, _) {
                     final snapshot = controller!.snapshot;
-                    if (snapshot.errorMessage != null) {
-                      return _VideoError(message: snapshot.errorMessage!, onRetry: onRetry);
+                    final resolvedError = errorMessage ?? snapshot.errorMessage;
+                    if (resolvedError != null) {
+                      return _VideoError(message: resolvedError, onRetry: onRetry);
                     }
                     if (!snapshot.isInitialized) {
                       return _VideoLoadingCover(video: video);
@@ -486,8 +609,66 @@ class _VideoLoadingCover extends StatelessWidget {
           ),
         ),
         ColoredBox(color: AppColors.player.withValues(alpha: 0.52)),
-        const Center(child: CircularProgressIndicator(color: AppColors.sunshine)),
+        const Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircularProgressIndicator(color: AppColors.sunshine),
+              SizedBox(height: 16),
+              Text(
+                '正在准备视频…',
+                style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+              ),
+            ],
+          ),
+        ),
       ],
+    );
+  }
+}
+
+class _BufferingFeedback extends StatelessWidget {
+  const _BufferingFeedback({required this.isSlow, required this.onRetry});
+
+  final bool isSlow;
+  final Future<void> Function() onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.7),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
+        boxShadow: const [BoxShadow(color: Colors.black38, blurRadius: 24, offset: Offset(0, 10))],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox.square(
+              dimension: 30,
+              child: CircularProgressIndicator(color: AppColors.sunshine, strokeWidth: 3),
+            ),
+            const SizedBox(height: 14),
+            Text(
+              isSlow ? '网络有点慢，仍在努力加载' : '正在缓冲，请稍候',
+              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+            ),
+            if (isSlow) ...[
+              const SizedBox(height: 12),
+              TextButton.icon(
+                key: const Key('缓冲重新加载按钮'),
+                onPressed: onRetry,
+                style: TextButton.styleFrom(foregroundColor: AppColors.sunshine),
+                icon: const Icon(Icons.refresh_rounded),
+                label: const Text('重新加载'),
+              ),
+            ],
+          ],
+        ),
+      ),
     );
   }
 }
@@ -552,6 +733,42 @@ class _RoundControlButton extends StatelessWidget {
         side: BorderSide(color: Colors.white.withValues(alpha: 0.16)),
       ),
       icon: Icon(icon),
+    );
+  }
+}
+
+class _DesktopNavigationButton extends StatelessWidget {
+  const _DesktopNavigationButton({
+    required this.tooltip,
+    required this.icon,
+    required this.onPressed,
+    super.key,
+  });
+
+  final String tooltip;
+  final IconData icon;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: tooltip,
+      child: IconButton.filled(
+        tooltip: tooltip,
+        onPressed: onPressed,
+        iconSize: 38,
+        padding: const EdgeInsets.all(15),
+        style: IconButton.styleFrom(
+          minimumSize: const Size.square(68),
+          backgroundColor: const Color(0xD9263C50),
+          foregroundColor: Colors.white,
+          side: BorderSide(color: Colors.white.withValues(alpha: 0.22)),
+          elevation: 10,
+          shadowColor: Colors.black54,
+        ),
+        icon: Icon(icon),
+      ),
     );
   }
 }

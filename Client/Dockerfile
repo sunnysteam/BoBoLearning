@@ -4,6 +4,7 @@ FROM debian:bookworm-slim AS builder
 
 ARG FLUTTER_VERSION=3.47.2
 ARG API_BASE_URL=https://wx.jiayuntong.com:5172/server/
+ARG WEB_BUILD_TIMESTAMP=""
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends ca-certificates curl git unzip xz-utils zip \
     && rm -rf /var/lib/apt/lists/* \
@@ -23,8 +24,11 @@ COPY Client/lib ./lib
 COPY Client/web ./web
 COPY Client/assets ./assets
 COPY Client/analysis_options.yaml Client/.metadata ./
+COPY scripts/stamp-web-build.dart /workspace/scripts/stamp-web-build.dart
 RUN flutter build web --release --base-href=/ \
-    "--dart-define=API_BASE_URL=${API_BASE_URL}"
+    "--dart-define=API_BASE_URL=${API_BASE_URL}" \
+    && dart /workspace/scripts/stamp-web-build.dart \
+        /workspace/Client/build/web "${WEB_BUILD_TIMESTAMP}"
 
 FROM nginx:1.28-alpine AS runtime
 

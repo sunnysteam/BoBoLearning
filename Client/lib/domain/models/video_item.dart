@@ -5,6 +5,7 @@ class VideoItem {
     required this.title,
     required this.coverUri,
     required this.streamUri,
+    this.hlsUri,
     this.folderPath = '',
   });
 
@@ -13,6 +14,7 @@ class VideoItem {
   final String folderPath;
   final Uri coverUri;
   final Uri streamUri;
+  final Uri? hlsUri;
 
   @override
   bool operator ==(Object other) {
@@ -21,9 +23,10 @@ class VideoItem {
         other.title == title &&
         other.folderPath == folderPath &&
         other.coverUri == coverUri &&
-        other.streamUri == streamUri;
+        other.streamUri == streamUri &&
+        other.hlsUri == hlsUri;
   }
 
   @override
-  int get hashCode => Object.hash(id, title, folderPath, coverUri, streamUri);
+  int get hashCode => Object.hash(id, title, folderPath, coverUri, streamUri, hlsUri);
 }

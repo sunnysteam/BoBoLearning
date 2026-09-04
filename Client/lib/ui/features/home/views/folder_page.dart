@@ -26,8 +26,9 @@ class FolderPage extends StatelessWidget {
       initialIndex: index,
       controllerFactory: playbackControllerFactory,
     );
-    await Navigator.of(context)
-        .push<void>(MaterialPageRoute<void>(builder: (_) => PlayerPage(viewModel: viewModel)));
+    await Navigator.of(
+      context,
+    ).push<void>(MaterialPageRoute<void>(builder: (_) => PlayerPage(viewModel: viewModel)));
   }
 
   @override
@@ -175,8 +176,9 @@ class _FolderPageHeader extends StatelessWidget {
   Widget _buildDescription(BuildContext context) {
     return Text(
       '$count 个视频 · 选一个开始探索吧',
-      style: Theme.of(context).textTheme.bodyMedium
-          ?.copyWith(color: AppColors.mutedInk, fontWeight: FontWeight.w600),
+      style: Theme.of(
+        context,
+      ).textTheme.bodyMedium?.copyWith(color: AppColors.mutedInk, fontWeight: FontWeight.w600),
     );
   }
 }

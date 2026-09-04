@@ -137,7 +137,7 @@ class _UnusedPlaybackControllerFactory implements PlaybackControllerFactory {
   const _UnusedPlaybackControllerFactory();
 
   @override
-  PlaybackController create(Uri streamUri) {
+  PlaybackController create(Uri streamUri, {Uri? hlsUri}) {
     throw StateError('本测试不应创建播放器');
   }
 }

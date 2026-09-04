@@ -2,12 +2,13 @@ use std::{
     collections::{HashMap, HashSet},
     ffi::OsString,
     fmt::Write as _,
-    fs::{File, read_dir},
+    fs::{self, File, read_dir},
     path::{Path, PathBuf},
     sync::Arc,
 };
 
 use anyhow::{Context, Result, bail};
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::sync::{Mutex, RwLock};
 use tracing::{error, info, warn};
@@ -15,15 +16,38 @@ use walkdir::{DirEntry, WalkDir};
 
 use crate::cover::{CoverResolver, CoverSource};
 
+pub const PUBLISHED_ASSET_FILE: &str = "asset.json";
+pub const PUBLISHED_ASSET_SCHEMA_VERSION: u32 = 1;
+
 /// 自动发现的视频资源。
 #[derive(Clone, Debug)]
 pub struct VideoEntry {
     pub id: String,
     pub title: String,
     pub folder_path: String,
-    pub video_path: PathBuf,
+    pub video_path: Option<PathBuf>,
     pub cover_path: PathBuf,
     pub relative_video_path: String,
+    pub published_hls_version: Option<String>,
+}
+
+impl VideoEntry {
+    pub fn is_incoming(&self) -> bool {
+        self.video_path.is_some()
+    }
+}
+
+/// 与 HLS 分片一起持久化的最小内容元数据。
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublishedAssetManifest {
+    pub schema_version: u32,
+    pub id: String,
+    pub version: String,
+    pub title: String,
+    pub folder_path: String,
+    pub relative_video_path: String,
+    pub cover_file: String,
 }
 
 /// 一次扫描得到的不可变目录快照。
@@ -54,6 +78,10 @@ impl Catalog {
     pub fn len(&self) -> usize {
         self.entries.len()
     }
+
+    fn into_entries(self) -> Vec<VideoEntry> {
+        self.entries.into_iter().map(Arc::unwrap_or_clone).collect()
+    }
 }
 
 /// 对目录快照提供线程安全的原子替换。
@@ -66,13 +94,15 @@ pub struct CatalogStore {
 #[derive(Clone)]
 pub struct MediaScanner {
     media_dir: PathBuf,
+    hls_cache_dir: PathBuf,
     cover_resolver: CoverResolver,
 }
 
 impl MediaScanner {
-    pub fn new(media_dir: PathBuf, cover_resolver: CoverResolver) -> Self {
+    pub fn new(media_dir: PathBuf, hls_cache_dir: PathBuf, cover_resolver: CoverResolver) -> Self {
         Self {
             media_dir,
+            hls_cache_dir,
             cover_resolver,
         }
     }
@@ -82,7 +112,22 @@ impl MediaScanner {
     }
 
     pub fn scan(&self) -> Result<ScanReport> {
-        scan_media_with_resolver(&self.media_dir, Some(&self.cover_resolver))
+        let mut incoming = scan_media_with_resolver(&self.media_dir, Some(&self.cover_resolver))?;
+        let (published, published_warnings) = scan_published_assets(&self.hls_cache_dir)?;
+        incoming.warnings.extend(published_warnings);
+
+        let mut entries = published
+            .into_iter()
+            .map(|entry| (entry.id.clone(), entry))
+            .collect::<HashMap<_, _>>();
+        // 同一路径重新投放时，新源文件优先，转码完成后再切换到新版本。
+        for entry in incoming.catalog.into_entries() {
+            entries.insert(entry.id.clone(), entry);
+        }
+        let mut entries = entries.into_values().collect::<Vec<_>>();
+        sort_entries(&mut entries);
+        incoming.catalog = Catalog::new(entries);
+        Ok(incoming)
     }
 
     pub fn cleanup_unused_covers(&self, active_paths: &HashSet<PathBuf>) -> Vec<String> {
@@ -264,13 +309,148 @@ fn scan_media_with_resolver(
             id,
             title,
             folder_path,
-            video_path,
+            video_path: Some(video_path),
             cover_path,
             relative_video_path,
+            published_hls_version: None,
         });
     }
 
-    discovered.sort_by(|left, right| {
+    sort_entries(&mut discovered);
+
+    Ok(ScanReport {
+        catalog: Catalog::new(discovered),
+        warnings,
+        active_generated_covers,
+    })
+}
+
+/// 从已发布 HLS 资产恢复目录；这里不会再次触发转码。
+fn scan_published_assets(cache_dir: &Path) -> Result<(Vec<VideoEntry>, Vec<String>)> {
+    let root = cache_dir
+        .canonicalize()
+        .with_context(|| format!("无法规范化 HLS 资产目录：{}", cache_dir.display()))?;
+    if !root.is_dir() {
+        bail!("HLS 资产路径不是文件夹：{}", root.display());
+    }
+
+    let mut warnings = Vec::new();
+    let mut by_id = HashMap::<String, (u128, VideoEntry)>::new();
+    for result in WalkDir::new(&root)
+        .min_depth(3)
+        .max_depth(3)
+        .follow_links(false)
+    {
+        let entry = match result {
+            Ok(entry) => entry,
+            Err(error) => {
+                warnings.push(format!("跳过无法读取的 HLS 资产路径：{error}"));
+                continue;
+            }
+        };
+        if !entry.file_type().is_file() || entry.file_name() != PUBLISHED_ASSET_FILE {
+            continue;
+        }
+
+        let manifest_path = entry.path();
+        match parse_published_asset(&root, manifest_path) {
+            Ok(video) => {
+                let modified_nanos = fs::metadata(manifest_path)
+                    .and_then(|metadata| metadata.modified())
+                    .ok()
+                    .and_then(|modified| modified.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|duration| duration.as_nanos())
+                    .unwrap_or_default();
+                let replace = by_id
+                    .get(&video.id)
+                    .map(|(existing, _)| modified_nanos > *existing)
+                    .unwrap_or(true);
+                if replace {
+                    by_id.insert(video.id.clone(), (modified_nanos, video));
+                }
+            }
+            Err(error) => warnings.push(format!(
+                "跳过无效的 HLS 资产 {}：{error:#}",
+                manifest_path.display()
+            )),
+        }
+    }
+
+    Ok((
+        by_id.into_values().map(|(_, entry)| entry).collect(),
+        warnings,
+    ))
+}
+
+fn parse_published_asset(root: &Path, manifest_path: &Path) -> Result<VideoEntry> {
+    let bytes = fs::read(manifest_path)
+        .with_context(|| format!("无法读取资产元数据：{}", manifest_path.display()))?;
+    let manifest: PublishedAssetManifest = serde_json::from_slice(&bytes)
+        .with_context(|| format!("资产元数据不是有效 JSON：{}", manifest_path.display()))?;
+    if manifest.schema_version != PUBLISHED_ASSET_SCHEMA_VERSION {
+        bail!("不支持的资产元数据版本：{}", manifest.schema_version);
+    }
+    if stable_id(&manifest.relative_video_path) != manifest.id {
+        bail!("资产 ID 与原始相对路径不匹配");
+    }
+
+    let version_dir = manifest_path.parent().context("资产元数据缺少版本目录")?;
+    let id_dir = version_dir.parent().context("资产元数据缺少视频目录")?;
+    let actual_version = version_dir
+        .file_name()
+        .and_then(|value| value.to_str())
+        .context("HLS 版本目录名不是有效文本")?;
+    let actual_id = id_dir
+        .file_name()
+        .and_then(|value| value.to_str())
+        .context("HLS 视频目录名不是有效文本")?;
+    if actual_id != manifest.id || actual_version != manifest.version {
+        bail!("资产元数据与所在目录不匹配");
+    }
+    if id_dir.parent() != Some(root) {
+        bail!("资产目录层级无效");
+    }
+
+    let cover_name = Path::new(&manifest.cover_file);
+    if cover_name.file_name().and_then(|value| value.to_str()) != Some(manifest.cover_file.as_str())
+        || cover_name.components().count() != 1
+    {
+        bail!("资产封面文件名无效");
+    }
+    let cover_path = version_dir.join(cover_name);
+    if !is_readable_nonempty_file(&cover_path)
+        || !is_readable_nonempty_file(&version_dir.join("index.m3u8"))
+        || !is_readable_nonempty_file(&version_dir.join("init.mp4"))
+    {
+        bail!("资产清单、初始化片或封面缺失");
+    }
+    let has_segment = read_dir(version_dir)
+        .with_context(|| format!("无法读取 HLS 版本目录：{}", version_dir.display()))?
+        .filter_map(Result::ok)
+        .any(|entry| {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            name.starts_with("seg_")
+                && name.ends_with(".m4s")
+                && is_readable_nonempty_file(&entry.path())
+        });
+    if !has_segment {
+        bail!("资产媒体分片缺失");
+    }
+
+    Ok(VideoEntry {
+        id: manifest.id,
+        title: manifest.title,
+        folder_path: manifest.folder_path,
+        video_path: None,
+        cover_path,
+        relative_video_path: manifest.relative_video_path,
+        published_hls_version: Some(manifest.version),
+    })
+}
+
+fn sort_entries(entries: &mut [VideoEntry]) {
+    entries.sort_by(|left, right| {
         natord::compare_ignore_case(&left.folder_path, &right.folder_path)
             .then_with(|| left.folder_path.cmp(&right.folder_path))
             .then_with(|| {
@@ -278,12 +458,13 @@ fn scan_media_with_resolver(
             })
             .then_with(|| left.relative_video_path.cmp(&right.relative_video_path))
     });
+}
 
-    Ok(ScanReport {
-        catalog: Catalog::new(discovered),
-        warnings,
-        active_generated_covers,
-    })
+fn is_readable_nonempty_file(path: &Path) -> bool {
+    File::open(path)
+        .and_then(|file| file.metadata())
+        .map(|metadata| metadata.is_file() && metadata.len() > 0)
+        .unwrap_or(false)
 }
 
 /// 执行一次后台刷新；已有扫描进行中时直接合并本次请求。
@@ -471,8 +652,10 @@ mod tests {
         let root = tempdir().expect("临时目录应创建成功");
         let media = root.path().join("media");
         let cache = root.path().join("cache");
+        let hls_cache = root.path().join("hls-cache");
         let default_cover = root.path().join("default.png");
         fs::create_dir_all(&cache).expect("缓存目录应创建成功");
+        fs::create_dir_all(&hls_cache).expect("HLS 目录应创建成功");
         write_file(&media.join("课程/没有封面.mp4"));
         write_file(&default_cover);
 
@@ -485,7 +668,7 @@ mod tests {
                 should_fail: false,
             }),
         );
-        let scanner = MediaScanner::new(media, resolver);
+        let scanner = MediaScanner::new(media, hls_cache, resolver);
 
         let first = scanner.scan().expect("首次扫描应成功");
         let second = scanner.scan().expect("第二次扫描应成功");
@@ -503,8 +686,10 @@ mod tests {
         let root = tempdir().expect("临时目录应创建成功");
         let media = root.path().join("media");
         let cache = root.path().join("cache");
+        let hls_cache = root.path().join("hls-cache");
         let default_cover = root.path().join("default.png");
         fs::create_dir_all(&cache).expect("缓存目录应创建成功");
+        fs::create_dir_all(&hls_cache).expect("HLS 目录应创建成功");
         write_file(&media.join("课程/损坏视频.mp4"));
         write_file(&default_cover);
 
@@ -516,7 +701,7 @@ mod tests {
                 should_fail: true,
             }),
         );
-        let report = MediaScanner::new(media, resolver)
+        let report = MediaScanner::new(media, hls_cache, resolver)
             .scan()
             .expect("扫描应成功");
 
@@ -583,5 +768,49 @@ mod tests {
         let report = scan_media(root.path()).expect("扫描应成功");
 
         assert_eq!(report.catalog.len(), 0);
+    }
+
+    #[test]
+    fn 源视频清理后可从正式资产恢复目录() {
+        let root = tempdir().expect("临时目录应创建成功");
+        let relative_video_path = "课程/颜色.mp4";
+        let id = stable_id(relative_video_path);
+        let version = "version-1";
+        let asset_dir = root.path().join(&id).join(version);
+        fs::create_dir_all(&asset_dir).expect("正式资产目录应创建成功");
+        write_file(&asset_dir.join("index.m3u8"));
+        write_file(&asset_dir.join("init.mp4"));
+        write_file(&asset_dir.join("seg_00000.m4s"));
+        write_file(&asset_dir.join("cover.webp"));
+        let manifest = PublishedAssetManifest {
+            schema_version: PUBLISHED_ASSET_SCHEMA_VERSION,
+            id: id.clone(),
+            version: version.to_owned(),
+            title: "颜色".to_owned(),
+            folder_path: "课程".to_owned(),
+            relative_video_path: relative_video_path.to_owned(),
+            cover_file: "cover.webp".to_owned(),
+        };
+        fs::write(
+            asset_dir.join(PUBLISHED_ASSET_FILE),
+            serde_json::to_vec(&manifest).expect("资产元数据应序列化成功"),
+        )
+        .expect("资产元数据应写入成功");
+
+        let (entries, warnings) = scan_published_assets(root.path()).expect("正式资产应可扫描");
+
+        assert!(warnings.is_empty());
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].id, id);
+        assert_eq!(entries[0].folder_path, "课程");
+        assert!(entries[0].video_path.is_none());
+        assert_eq!(entries[0].published_hls_version.as_deref(), Some(version));
+        assert_eq!(
+            entries[0].cover_path,
+            asset_dir
+                .join("cover.webp")
+                .canonicalize()
+                .expect("正式封面路径应可规范化")
+        );
     }
 }

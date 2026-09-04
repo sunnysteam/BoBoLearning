@@ -4,3 +4,6 @@
 /.playwright-cli/
 /Service/updates/*
 !/Service/updates/.gitkeep
+/Service/hls-cache/*
+!/Service/hls-cache/.gitignore
+!/Service/hls-cache/README.md

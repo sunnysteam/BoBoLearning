@@ -1,7 +1,7 @@
 name: bobo_learning
 description: 菠萝乐园儿童内容客户端
 publish_to: none
-version: 0.2.4+6
+version: 0.2.8+10
 
 environment:
   sdk: ^3.13.2
@@ -12,6 +12,7 @@ dependencies:
     sdk: flutter
   http: ^1.6.0
   video_player: ^2.14.0
+  web: ^1.1.1
 
 dev_dependencies:
   flutter_test:

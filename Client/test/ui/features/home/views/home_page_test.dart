@@ -240,7 +240,7 @@ class _UnusedPlaybackControllerFactory implements PlaybackControllerFactory {
   const _UnusedPlaybackControllerFactory();
 
   @override
-  PlaybackController create(Uri streamUri) {
+  PlaybackController create(Uri streamUri, {Uri? hlsUri}) {
     throw StateError('本测试不应创建播放器');
   }
 }
@@ -249,7 +249,7 @@ class _RecordingPlaybackControllerFactory implements PlaybackControllerFactory {
   final List<Uri> createdUris = [];
 
   @override
-  PlaybackController create(Uri streamUri) {
+  PlaybackController create(Uri streamUri, {Uri? hlsUri}) {
     createdUris.add(streamUri);
     return _ReadyPlaybackController();
   }

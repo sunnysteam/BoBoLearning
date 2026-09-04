@@ -57,8 +57,9 @@ class PortalPage extends StatelessWidget {
                       child: Text(
                         '今天想去哪里玩？',
                         key: const Key('菠萝首页主标题'),
-                        style: Theme.of(context).textTheme.bodyLarge
-                            ?.copyWith(color: AppColors.ink),
+                        style: Theme.of(
+                          context,
+                        ).textTheme.bodyLarge?.copyWith(color: AppColors.ink),
                       ),
                     ),
                   ),
@@ -157,8 +158,10 @@ class _PortalHeader extends StatelessWidget {
             children: [
               Text(
                 '菠萝乐园',
-                style: Theme.of(context).textTheme.headlineMedium
-                    ?.copyWith(fontSize: compact ? 27 : 32, fontWeight: FontWeight.w900),
+                style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                  fontSize: compact ? 27 : 32,
+                  fontWeight: FontWeight.w900,
+                ),
               ),
               const SizedBox(height: 3),
               Text(
@@ -318,16 +321,19 @@ class _CompactCategoryContent extends StatelessWidget {
             children: [
               Text(
                 section.title,
-                style: Theme.of(context).textTheme.titleLarge
-                    ?.copyWith(fontSize: 23, fontWeight: FontWeight.w900),
+                style: Theme.of(
+                  context,
+                ).textTheme.titleLarge?.copyWith(fontSize: 23, fontWeight: FontWeight.w900),
               ),
               const SizedBox(height: 7),
               Text(
                 section.description,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.bodyMedium
-                    ?.copyWith(color: AppColors.ink.withValues(alpha: 0.76), fontSize: 15),
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: AppColors.ink.withValues(alpha: 0.76),
+                  fontSize: 15,
+                ),
               ),
               const SizedBox(height: 10),
               _ExploreLabel(accent: section.accent),
@@ -353,16 +359,19 @@ class _ExpandedCategoryContent extends StatelessWidget {
         const Spacer(),
         Text(
           section.title,
-          style: Theme.of(context).textTheme.headlineMedium
-              ?.copyWith(fontSize: 27, fontWeight: FontWeight.w900),
+          style: Theme.of(
+            context,
+          ).textTheme.headlineMedium?.copyWith(fontSize: 27, fontWeight: FontWeight.w900),
         ),
         const SizedBox(height: 7),
         Text(
           section.description,
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
-          style: Theme.of(context).textTheme.bodyMedium
-              ?.copyWith(color: AppColors.ink.withValues(alpha: 0.76), fontSize: 15),
+          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+            color: AppColors.ink.withValues(alpha: 0.76),
+            fontSize: 15,
+          ),
         ),
         const SizedBox(height: 14),
         _ExploreLabel(accent: section.accent),
@@ -531,8 +540,9 @@ class _PreparingSectionPage extends StatelessWidget {
                               Text(
                                 section.preparingMessage,
                                 textAlign: TextAlign.center,
-                                style: Theme.of(context).textTheme.bodyLarge
-                                    ?.copyWith(color: AppColors.mutedInk),
+                                style: Theme.of(
+                                  context,
+                                ).textTheme.bodyLarge?.copyWith(color: AppColors.mutedInk),
                               ),
                               const SizedBox(height: 22),
                               DecoratedBox(
@@ -545,8 +555,9 @@ class _PreparingSectionPage extends StatelessWidget {
                                   padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 11),
                                   child: Text(
                                     '小世界正在准备中',
-                                    style: Theme.of(context).textTheme.labelLarge
-                                        ?.copyWith(color: AppColors.ink),
+                                    style: Theme.of(
+                                      context,
+                                    ).textTheme.labelLarge?.copyWith(color: AppColors.ink),
                                   ),
                                 ),
                               ),

@@ -19,6 +19,7 @@ void main() {
               'folderPath': '颜色启蒙',
               'coverUrl': '/api/v1/videos/1/cover',
               'streamUrl': '/api/v1/videos/1/stream',
+              'hlsUrl': '/api/v1/videos/1/hls/v1/index.m3u8',
             },
           ],
         }),
@@ -41,6 +42,10 @@ void main() {
     expect(
       result.single.streamUri,
       Uri.parse('https://learning.example/server/api/v1/videos/1/stream'),
+    );
+    expect(
+      result.single.hlsUri,
+      Uri.parse('https://learning.example/server/api/v1/videos/1/hls/v1/index.m3u8'),
     );
     expect(result.single.folderPath, '颜色启蒙');
   });

@@ -58,8 +58,9 @@ class _AppUpdatePromptHostState extends State<AppUpdatePromptHost> {
         if (!mounted) {
           return;
         }
-        ScaffoldMessenger.maybeOf(context)
-            ?.showSnackBar(SnackBar(content: Text(message), showCloseIcon: true));
+        ScaffoldMessenger.maybeOf(
+          context,
+        )?.showSnackBar(SnackBar(content: Text(message), showCloseIcon: true));
       });
     }
   }
@@ -138,8 +139,9 @@ class _UpdateReadyDialog extends StatelessWidget {
                     padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
                     child: Text(
                       '菠萝乐园 ${update.versionName}',
-                      style: Theme.of(context).textTheme.labelLarge
-                          ?.copyWith(color: AppColors.tealDark),
+                      style: Theme.of(
+                        context,
+                      ).textTheme.labelLarge?.copyWith(color: AppColors.tealDark),
                     ),
                   ),
                 ),

@@ -1,6 +1,6 @@
 # 菠萝乐园
 
-菠萝乐园是一个面向儿童的轻量内容应用，首页包含菠萝早教、菠萝视频和菠萝相册三个分类。当前可用的菠萝早教模块由 Rust 服务自动发现资源文件夹中的 MP4 视频；有同名图片时使用人工封面，没有图片时通过 FFmpeg 自动截取封面。Flutter 客户端按媒体文件夹分区展示横向视频书架，并提供进度拖动、点击播放/暂停以及分类内上下滑切换。
+菠萝乐园是一个面向儿童的轻量内容应用，首页包含菠萝早教、菠萝视频和菠萝相册三个分类。当前可用的菠萝早教模块由 Rust 服务自动发现新增 MP4；有同名图片时使用人工封面，没有图片时通过 FFmpeg 自动截取封面。Service 在后台串行生成 HLS+CMAF 正式资产，完整落盘后自动清理对应源文件；Flutter Web 和 Android 均优先播放 HLS。客户端按原始媒体文件夹分区展示横向视频书架，并提供进度拖动、点击播放/暂停以及分类内上下滑切换。
 
 ## 推荐部署方式
 
@@ -21,16 +21,17 @@ docker compose down
 
 - Flutter Web 与 Rust Service 分别构建并运行在 `client`、`service` 两个容器中。
 - Client 使用 Nginx 托管 Web，并把同源 `/api`、`/healthz` 代理到 Service。
-- 宿主机 `Service/media` 只读映射到容器 `/app/media`，媒体不会进入镜像。
+- 宿主机 `Service/media` 作为新增内容收件箱映射到容器 `/app/media`，媒体不会进入镜像。
 - 宿主机 `Service/updates` 只读映射到容器 `/app/updates`，升级 APK 不会进入镜像。
 - 自动封面保存在 Docker 命名卷 `/app/cover-cache`，不会修改宿主机媒体文件。
+- HLS/CMAF 正式资产由宿主机 `Service/hls-cache` 映射到 `/app/hls-cache`，可直接查看、备份和迁移。正式 Compose 默认处理收件箱中的全部新增视频；将 `BOBO_HLS_PREWARM_LIMIT` 设为正整数可限制单次排队数量。
 - 两个容器均以非 root 用户运行，根文件系统只读，并禁用新增权限。
 - 容器每 10 秒进行一次兜底扫描；文件系统事件正常时会更快更新。
 - 前端健康检查地址为 <http://localhost:5170/healthz>，后端直连健康检查地址为 <http://localhost:5171/healthz>。
 
-## 放入视频资源
+## 投放新增视频
 
-一个文件夹内可以放多个视频，也可以创建任意层级的子文件夹。封面图片是可选的：
+`Service/media` 是新增内容收件箱。一个文件夹内可以放多个视频，也可以创建任意层级的子文件夹。封面图片是可选的：
 
 ```text
 Service/media/
@@ -48,7 +49,9 @@ Service/media/
 
 视频支持 `.mp4`；人工封面支持 `.webp`、`.png`、`.jpg`、`.jpeg`，必须与视频位于同一文件夹且基础文件名完全相同。人工封面始终优先；缺少人工封面时，后端默认截取第 3 秒画面并生成 `640×360` WebP，短视频会回退到首帧。截帧失败时使用应用默认封面，视频仍会进入列表。
 
-文件复制完成后，默认在 15 秒内自动反映到列表，无需重启容器。网页已经打开时，请下拉刷新或刷新浏览器以获取新列表。
+文件复制完成后，默认在 15 秒内自动反映到列表，无需重启容器。HLS 分片、正式封面和 `asset.json` 完整发布后，服务会删除对应源 MP4 和同名人工封面；转码失败时保留源文件。网页已经打开时，请下拉刷新或刷新浏览器以获取新列表。
+
+正式资产保存在 `Service/hls-cache/{视频ID}/{版本}/`，每个目录包含 `index.m3u8`、`init.mp4`、`seg_*.m4s`、封面和 `asset.json`。服务重启后从这些元数据恢复目录，不会重新转码已有内容；只有新放入或同路径重新投放的 MP4 才会进入队列。该目录是清理源文件后的内容权威来源，必须纳入备份。
 
 查看自动发现日志：
 
@@ -65,15 +68,17 @@ BOBO_WEB_PORT=5170
 BOBO_API_PORT=5171
 BOBO_PUBLIC_API_BASE_URL=https://wx.jiayuntong.com:5172/server/
 BOBO_MEDIA_HOST_PATH=G:/BoBoMedia
+BOBO_HLS_HOST_PATH=G:/BoBoHlsAssets
 BOBO_UPDATE_HOST_PATH=G:/BoBoUpdates
 BOBO_COVER_CAPTURE_SECS=3
+BOBO_HLS_PREWARM_LIMIT=0
 ```
 
 APK 与 Web 的默认正式服务根地址均为 `https://wx.jiayuntong.com:5172/server/`，客户端会自动补齐 `api/v1/`。外层 Nginx 的 `/server/` 会去掉此前缀并转发到 Rust Service。`BOBO_PUBLIC_API_BASE_URL` 可在构建 Web 镜像时覆盖该地址。
 
-`BOBO_MEDIA_HOST_PATH` 和 `BOBO_UPDATE_HOST_PATH` 必须指向已经存在的目录。Compose 不会替你创建目录，路径错误会直接启动失败，从而避免误挂载空目录。Windows Docker Desktop 需允许 Docker 访问对应盘符。
+`BOBO_MEDIA_HOST_PATH`、`BOBO_HLS_HOST_PATH` 和 `BOBO_UPDATE_HOST_PATH` 必须指向已经存在的目录。Compose 不会替你创建目录，路径错误会直接启动失败，从而避免误挂载空目录。Windows Docker Desktop 需允许 Docker 访问对应盘符。
 
-自动封面缓存由 Compose 命名卷 `cover-cache` 持久化。执行普通的 `docker compose down` 不会删除缓存；只有显式执行 `docker compose down --volumes` 才会删除，之后服务会重新截取。
+自动封面中间缓存由 Compose 命名卷 `cover-cache` 持久化；HLS/CMAF 正式资产使用 `BOBO_HLS_HOST_PATH` 指向的宿主机目录。`docker compose down --volumes` 只会删除自动封面缓存，不会删除正式资产 bind mount。
 
 ## Android 调试
 
@@ -130,7 +135,7 @@ $env:BOBO_BIND='0.0.0.0:5171'
 cargo run
 ```
 
-Service 容器内部默认监听 `0.0.0.0:8080`，本地媒体目录为 `Service/media`，自动封面缓存为 `Service/cover-cache`，升级包目录为 `Service/updates`。可通过 `BOBO_BIND`、`BOBO_MEDIA_DIR`、`BOBO_COVER_CACHE_DIR`、`BOBO_UPDATE_DIR`、`BOBO_DEFAULT_COVER_PATH`、`BOBO_FFMPEG_BIN`、`BOBO_COVER_CAPTURE_SECS`、`BOBO_SCAN_DEBOUNCE_MS` 和 `BOBO_SCAN_INTERVAL_SECS` 覆盖。
+Service 容器内部默认监听 `0.0.0.0:8080`，本地媒体目录为 `Service/media`，自动封面缓存为 `Service/cover-cache`，HLS/CMAF 缓存为 `Service/hls-cache`，升级包目录为 `Service/updates`。可通过 `BOBO_BIND`、`BOBO_MEDIA_DIR`、`BOBO_COVER_CACHE_DIR`、`BOBO_HLS_CACHE_DIR`、`BOBO_HLS_PREWARM_LIMIT`、`BOBO_UPDATE_DIR`、`BOBO_DEFAULT_COVER_PATH`、`BOBO_FFMPEG_BIN`、`BOBO_COVER_CAPTURE_SECS`、`BOBO_SCAN_DEBOUNCE_MS` 和 `BOBO_SCAN_INTERVAL_SECS` 覆盖。
 
 ## 验收命令
 
@@ -143,7 +148,9 @@ cargo test
 cd ..\Client
 C:\Users\yxb\fvm\default\bin\flutter.bat analyze
 C:\Users\yxb\fvm\default\bin\flutter.bat test
-C:\Users\yxb\fvm\default\bin\flutter.bat build web --release
+cd ..
+.\scripts\build-web-release.ps1
+cd Client
 C:\Users\yxb\fvm\default\bin\flutter.bat build apk --debug
 
 cd ..
@@ -152,6 +159,8 @@ docker compose build
 docker compose up -d
 docker compose exec service ffmpeg -version
 ```
+
+`build-web-release.ps1` 会为本次 Web 构建生成统一的 14 位时间戳，并分别写入 `flutter_bootstrap.js?v=时间戳` 与 `main.dart.js?v=时间戳`，防止发布后浏览器继续使用旧版启动入口或主程序。Docker 镜像构建也会执行同一套时间戳写入逻辑；如需可复现构建，可通过 `WEB_BUILD_TIMESTAMP` 构建参数显式指定时间戳。
 
 接口快速检查：
 

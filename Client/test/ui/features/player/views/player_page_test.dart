@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:bobo_learning/domain/models/video_item.dart';
 import 'package:bobo_learning/ui/core/app_theme.dart';
 import 'package:bobo_learning/ui/features/player/services/playback_controller.dart';
@@ -65,6 +67,173 @@ void main() {
     expect(factory.controllers[0].snapshot.isPlaying, isFalse);
     expect(factory.controllers[1].snapshot.isPlaying, isTrue);
   });
+
+  testWidgets('首次进入和上下切换的自动播放等待期间不显示播放按钮', (tester) async {
+    final firstPlayGate = Completer<void>();
+    final secondPlayGate = Completer<void>();
+    final firstPauseGate = Completer<void>();
+    final factory = _SequencePlaybackControllerFactory(
+      playGates: [firstPlayGate, secondPlayGate],
+      pauseGates: [firstPauseGate, null],
+    );
+    final viewModel = PlayerViewModel(
+      items: [_video('1', '认识花朵'), _video('2', '观察自然')],
+      initialIndex: 0,
+      controllerFactory: factory,
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.light,
+        home: PlayerPage(viewModel: viewModel),
+      ),
+    );
+    await tester.pump();
+
+    expect(viewModel.isAutoPlayPending, isTrue);
+    expect(find.byKey(const Key('中央播放按钮')), findsNothing);
+
+    firstPlayGate.complete();
+    await tester.pump();
+    await tester.pump();
+
+    expect(viewModel.isAutoPlayPending, isFalse);
+    expect(factory.controllers[0].snapshot.isPlaying, isTrue);
+    expect(find.byKey(const Key('中央播放按钮')), findsNothing);
+
+    await tester.drag(find.byKey(const Key('纵向视频列表')), const Offset(0, -520));
+    await tester.pump(const Duration(milliseconds: 600));
+
+    expect(viewModel.currentIndex, 1);
+    expect(viewModel.isAutoPlayPending, isTrue);
+    expect(find.byKey(const Key('中央播放按钮')), findsNothing);
+
+    firstPauseGate.complete();
+    await tester.pump();
+
+    expect(viewModel.isAutoPlayPending, isTrue);
+    expect(find.byKey(const Key('中央播放按钮')), findsNothing);
+
+    secondPlayGate.complete();
+    await tester.pumpAndSettle();
+
+    expect(viewModel.isAutoPlayPending, isFalse);
+    expect(factory.controllers[1].snapshot.isPlaying, isTrue);
+    expect(find.byKey(const Key('中央播放按钮')), findsNothing);
+  });
+
+  testWidgets('大屏 Web 左右按钮会按照前后视频边界显示并切换', (tester) async {
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final factory = _SequencePlaybackControllerFactory();
+    final viewModel = PlayerViewModel(
+      items: [_video('1', '第一条'), _video('2', '第二条'), _video('3', '第三条')],
+      initialIndex: 0,
+      controllerFactory: factory,
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.light,
+        home: PlayerPage(viewModel: viewModel, desktopNavigationEnabled: true),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('上一个视频按钮')), findsNothing);
+    expect(find.byKey(const Key('下一个视频按钮')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('下一个视频按钮')));
+    await tester.pumpAndSettle();
+
+    expect(viewModel.currentIndex, 1);
+    expect(find.byKey(const Key('上一个视频按钮')), findsOneWidget);
+    expect(find.byKey(const Key('下一个视频按钮')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('下一个视频按钮')));
+    await tester.pumpAndSettle();
+
+    expect(viewModel.currentIndex, 2);
+    expect(find.byKey(const Key('上一个视频按钮')), findsOneWidget);
+    expect(find.byKey(const Key('下一个视频按钮')), findsNothing);
+  });
+
+  testWidgets('手机宽度不显示大屏左右切换按钮', (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final viewModel = PlayerViewModel(
+      items: [_video('1', '第一条'), _video('2', '第二条')],
+      initialIndex: 0,
+      controllerFactory: _SequencePlaybackControllerFactory(),
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.light,
+        home: PlayerPage(viewModel: viewModel, desktopNavigationEnabled: true),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('上一个视频按钮')), findsNothing);
+    expect(find.byKey(const Key('下一个视频按钮')), findsNothing);
+  });
+
+  testWidgets('连续缓冲八秒后显示慢网络提示和重新加载入口', (tester) async {
+    final controller = _ControllablePlaybackController();
+    final viewModel = PlayerViewModel(
+      items: [_video('1', '认识花朵')],
+      initialIndex: 0,
+      controllerFactory: _FixedPlaybackControllerFactory(controller),
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.light,
+        home: PlayerPage(viewModel: viewModel),
+      ),
+    );
+    await tester.pumpAndSettle();
+    controller.setBuffering(true);
+    await tester.pump();
+
+    expect(find.text('正在缓冲，请稍候'), findsOneWidget);
+    expect(find.byKey(const Key('缓冲重新加载按钮')), findsNothing);
+
+    await tester.pump(const Duration(seconds: 8));
+
+    expect(find.text('网络有点慢，仍在努力加载'), findsOneWidget);
+    expect(find.byKey(const Key('缓冲重新加载按钮')), findsOneWidget);
+  });
+
+  testWidgets('Web 静音自动播放后显示开启声音入口', (tester) async {
+    final controller = _ControllablePlaybackController();
+    final viewModel = PlayerViewModel(
+      items: [_video('1', '认识花朵')],
+      initialIndex: 0,
+      controllerFactory: _FixedPlaybackControllerFactory(controller),
+      useMutedWebAutoPlay: true,
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.light,
+        home: PlayerPage(viewModel: viewModel),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('开启声音按钮')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('开启声音按钮')));
+    await tester.pump();
+
+    expect(find.byKey(const Key('开启声音按钮')), findsNothing);
+    expect(controller.volumeChanges, [0, 1]);
+  });
 }
 
 VideoItem _video(String id, String title) {
@@ -90,22 +259,35 @@ class _FixedPlaybackControllerFactory implements PlaybackControllerFactory {
   final PlaybackController controller;
 
   @override
-  PlaybackController create(Uri streamUri) => controller;
+  PlaybackController create(Uri streamUri, {Uri? hlsUri}) => controller;
 }
 
 class _SequencePlaybackControllerFactory implements PlaybackControllerFactory {
+  _SequencePlaybackControllerFactory({this.playGates = const [], this.pauseGates = const []});
+
+  final List<Completer<void>?> playGates;
+  final List<Completer<void>?> pauseGates;
   final List<_ControllablePlaybackController> controllers = [];
 
   @override
-  PlaybackController create(Uri streamUri) {
-    final controller = _ControllablePlaybackController();
+  PlaybackController create(Uri streamUri, {Uri? hlsUri}) {
+    final index = controllers.length;
+    final controller = _ControllablePlaybackController(
+      playGate: index < playGates.length ? playGates[index] : null,
+      pauseGate: index < pauseGates.length ? pauseGates[index] : null,
+    );
     controllers.add(controller);
     return controller;
   }
 }
 
 class _ControllablePlaybackController extends PlaybackController {
+  _ControllablePlaybackController({this.playGate, this.pauseGate});
+
+  final Completer<void>? playGate;
+  final Completer<void>? pauseGate;
   PlaybackSnapshot _snapshot = const PlaybackSnapshot.loading();
+  final List<double> volumeChanges = [];
 
   @override
   PlaybackSnapshot get snapshot => _snapshot;
@@ -115,6 +297,11 @@ class _ControllablePlaybackController extends PlaybackController {
 
   void complete() {
     _snapshot = _copySnapshot(isPlaying: false, isCompleted: true);
+    notifyListeners();
+  }
+
+  void setBuffering(bool isBuffering) {
+    _snapshot = _copySnapshot(isBuffering: isBuffering);
     notifyListeners();
   }
 
@@ -136,12 +323,19 @@ class _ControllablePlaybackController extends PlaybackController {
   Future<void> pause() async {
     _snapshot = _copySnapshot(isPlaying: false);
     notifyListeners();
+    await pauseGate?.future;
   }
 
   @override
   Future<void> play() async {
+    await playGate?.future;
     _snapshot = _copySnapshot(isPlaying: true, isCompleted: false);
     notifyListeners();
+  }
+
+  @override
+  Future<void> setVolume(double volume) async {
+    volumeChanges.add(volume);
   }
 
   @override
@@ -150,11 +344,16 @@ class _ControllablePlaybackController extends PlaybackController {
     notifyListeners();
   }
 
-  PlaybackSnapshot _copySnapshot({bool? isPlaying, bool? isCompleted, Duration? position}) {
+  PlaybackSnapshot _copySnapshot({
+    bool? isPlaying,
+    bool? isBuffering,
+    bool? isCompleted,
+    Duration? position,
+  }) {
     return PlaybackSnapshot(
       isInitialized: _snapshot.isInitialized,
       isPlaying: isPlaying ?? _snapshot.isPlaying,
-      isBuffering: _snapshot.isBuffering,
+      isBuffering: isBuffering ?? _snapshot.isBuffering,
       isCompleted: isCompleted ?? _snapshot.isCompleted,
       position: position ?? _snapshot.position,
       duration: _snapshot.duration,

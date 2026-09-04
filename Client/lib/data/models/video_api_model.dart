@@ -5,6 +5,7 @@ class VideoApiModel {
     required this.title,
     required this.coverUrl,
     required this.streamUrl,
+    this.hlsUrl,
     this.folderPath = '',
   });
 
@@ -15,6 +16,7 @@ class VideoApiModel {
       folderPath: _optionalFolderPath(json),
       coverUrl: _requiredString(json, 'coverUrl'),
       streamUrl: _requiredString(json, 'streamUrl'),
+      hlsUrl: _optionalString(json, 'hlsUrl'),
     );
   }
 
@@ -23,6 +25,7 @@ class VideoApiModel {
   final String folderPath;
   final String coverUrl;
   final String streamUrl;
+  final String? hlsUrl;
 
   static String _requiredString(Map<String, Object?> json, String key) {
     final value = json[key];
@@ -41,5 +44,17 @@ class VideoApiModel {
       throw const FormatException('视频数据缺少有效字段：folderPath');
     }
     return value;
+  }
+
+  static String? _optionalString(Map<String, Object?> json, String key) {
+    final value = json[key];
+    if (value == null) {
+      return null;
+    }
+    if (value is! String) {
+      throw FormatException('视频数据字段类型无效：$key');
+    }
+    final normalized = value.trim();
+    return normalized.isEmpty ? null : normalized;
   }
 }

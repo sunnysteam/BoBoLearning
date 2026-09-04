@@ -15,10 +15,12 @@ pub struct AppConfig {
     pub bind_addr: SocketAddr,
     pub media_dir: PathBuf,
     pub cover_cache_dir: PathBuf,
+    pub hls_cache_dir: PathBuf,
     pub update_dir: PathBuf,
     pub default_cover_path: PathBuf,
     pub ffmpeg_bin: OsString,
     pub cover_capture_seconds: u64,
+    pub hls_prewarm_limit: usize,
     pub scan_debounce: Duration,
     pub scan_interval: Option<Duration>,
 }
@@ -35,6 +37,8 @@ impl AppConfig {
         let media_dir = env_path("BOBO_MEDIA_DIR").unwrap_or_else(|| manifest_dir.join("media"));
         let cover_cache_dir =
             env_path("BOBO_COVER_CACHE_DIR").unwrap_or_else(|| manifest_dir.join("cover-cache"));
+        let hls_cache_dir =
+            env_path("BOBO_HLS_CACHE_DIR").unwrap_or_else(|| manifest_dir.join("hls-cache"));
         let update_dir =
             env_path("BOBO_UPDATE_DIR").unwrap_or_else(|| manifest_dir.join("updates"));
         let default_cover_path = env_path("BOBO_DEFAULT_COVER_PATH")
@@ -43,6 +47,8 @@ impl AppConfig {
             .filter(|value| !value.is_empty())
             .unwrap_or_else(|| OsString::from("ffmpeg"));
         let cover_capture_seconds = parse_u64_env("BOBO_COVER_CAPTURE_SECS", 3)?;
+        let hls_prewarm_limit = usize::try_from(parse_u64_env("BOBO_HLS_PREWARM_LIMIT", 4)?)
+            .context("BOBO_HLS_PREWARM_LIMIT 超出当前平台支持范围")?;
 
         let debounce_ms = parse_u64_env("BOBO_SCAN_DEBOUNCE_MS", 1_500)?;
         if debounce_ms == 0 {
@@ -56,10 +62,12 @@ impl AppConfig {
             bind_addr,
             media_dir,
             cover_cache_dir,
+            hls_cache_dir,
             update_dir,
             default_cover_path,
             ffmpeg_bin,
             cover_capture_seconds,
+            hls_prewarm_limit,
             scan_debounce: Duration::from_millis(debounce_ms),
             scan_interval,
         };
@@ -89,6 +97,11 @@ impl AppConfig {
                 "自动封面缓存路径不是文件夹：{}",
                 self.cover_cache_dir.display()
             );
+        }
+        fs::create_dir_all(&self.hls_cache_dir)
+            .with_context(|| format!("无法创建 HLS 缓存目录：{}", self.hls_cache_dir.display()))?;
+        if !self.hls_cache_dir.is_dir() {
+            bail!("HLS 缓存路径不是文件夹：{}", self.hls_cache_dir.display());
         }
         if !self.default_cover_path.is_file() {
             bail!(

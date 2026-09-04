@@ -21,6 +21,7 @@ class VideoRepositoryImpl implements VideoRepository {
             folderPath: model.folderPath,
             coverUri: _config.resolveResource(model.coverUrl),
             streamUri: _config.resolveResource(model.streamUrl),
+            hlsUri: model.hlsUrl == null ? null : _config.resolveResource(model.hlsUrl!),
           ),
         )
         .toList(growable: false);
