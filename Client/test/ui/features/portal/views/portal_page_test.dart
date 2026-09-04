@@ -50,7 +50,7 @@ void main() {
     expect(find.text('今天想去哪里玩？'), findsOneWidget);
   });
 
-  testWidgets('菠萝视频子页面有明确状态与返回按钮', (tester) async {
+  testWidgets('菠萝视频入口进入真实内容页面并可返回', (tester) async {
     await _setViewSize(tester, const Size(390, 844));
     await tester.pumpWidget(_buildTestApp());
 
@@ -62,7 +62,7 @@ void main() {
     expect(find.byKey(const Key('菠萝视频子页面')), findsOneWidget);
     expect(find.byKey(const Key('菠萝视频子页面标题')), findsOneWidget);
     expect(find.text('菠萝视频'), findsOneWidget);
-    expect(find.text('欢乐小舞台正在布置'), findsOneWidget);
+    expect(find.text('百度网盘视频内容'), findsOneWidget);
     expect(find.byKey(const Key('菠萝视频返回按钮')), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('菠萝视频返回按钮')));
@@ -70,7 +70,7 @@ void main() {
     expect(find.byKey(const Key('菠萝首页滚动区域')), findsOneWidget);
   });
 
-  testWidgets('菠萝相册子页面补充标题并保留返回路径', (tester) async {
+  testWidgets('菠萝相册入口进入真实内容页面并可返回', (tester) async {
     await _setViewSize(tester, const Size(390, 844));
     await tester.pumpWidget(_buildTestApp());
 
@@ -82,7 +82,7 @@ void main() {
     expect(find.byKey(const Key('菠萝相册子页面')), findsOneWidget);
     expect(find.byKey(const Key('菠萝相册子页面标题')), findsOneWidget);
     expect(find.text('菠萝相册'), findsOneWidget);
-    expect(find.text('相册星球正在收集笑脸'), findsOneWidget);
+    expect(find.text('百度网盘相册内容'), findsOneWidget);
     expect(find.byKey(const Key('菠萝相册返回按钮')), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('菠萝相册返回按钮')));
@@ -122,8 +122,33 @@ Widget _buildTestApp() {
         viewModel: HomeViewModel(repository: const _EmptyVideoRepository()),
         playbackControllerFactory: const _UnusedPlaybackControllerFactory(),
       ),
+      videoPageBuilder: (_) => const _StubSectionPage(title: '菠萝视频', content: '百度网盘视频内容'),
+      albumPageBuilder: (_) => const _StubSectionPage(title: '菠萝相册', content: '百度网盘相册内容'),
     ),
   );
+}
+
+class _StubSectionPage extends StatelessWidget {
+  const _StubSectionPage({required this.title, required this.content});
+
+  final String title;
+  final String content;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      key: Key('$title子页面'),
+      appBar: AppBar(
+        leading: IconButton(
+          key: Key('$title返回按钮'),
+          onPressed: () => Navigator.of(context).pop(),
+          icon: const Icon(Icons.arrow_back_rounded),
+        ),
+        title: Text(title, key: Key('$title子页面标题')),
+      ),
+      body: Center(child: Text(content)),
+    );
+  }
 }
 
 class _EmptyVideoRepository implements VideoRepository {

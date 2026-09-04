@@ -1,4 +1,5 @@
 mod api;
+mod baidu;
 mod config;
 mod cover;
 mod discovery;
@@ -10,6 +11,7 @@ use std::{process::ExitCode, sync::Arc};
 
 use anyhow::{Context, Result};
 use api::{AppState, build_router};
+use baidu::BaiduCloud;
 use config::AppConfig;
 use cover::{CoverResolver, FfmpegCoverGenerator};
 use discovery::{CatalogStore, MediaScanner};
@@ -31,7 +33,17 @@ async fn main() -> ExitCode {
 }
 
 async fn run() -> Result<()> {
+    if std::env::args().any(|argument| argument == "--authorize-baidu") {
+        return baidu::authorize_from_env().await;
+    }
+
     let config = AppConfig::from_env()?;
+    let baidu = BaiduCloud::from_env().await?;
+    if let Some(cloud) = &baidu {
+        info!("百度网盘直连已启用：根目录={}", cloud.root_path());
+    } else {
+        info!("百度网盘直连未启用");
+    }
     let cover_generator = Arc::new(FfmpegCoverGenerator::new(
         config.ffmpeg_bin.clone(),
         config.cover_capture_seconds,
@@ -92,6 +104,7 @@ async fn run() -> Result<()> {
         catalog: store,
         hls: hls_manager,
         update_dir: config.update_dir.clone(),
+        baidu,
     });
     let listener = tokio::net::TcpListener::bind(config.bind_addr)
         .await

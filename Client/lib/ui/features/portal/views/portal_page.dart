@@ -4,15 +4,22 @@ import 'package:flutter/material.dart';
 
 /// 菠萝系列内容的总入口。
 class PortalPage extends StatelessWidget {
-  const PortalPage({required this.earlyLearningPageBuilder, super.key});
+  const PortalPage({
+    required this.earlyLearningPageBuilder,
+    required this.videoPageBuilder,
+    required this.albumPageBuilder,
+    super.key,
+  });
 
   final WidgetBuilder earlyLearningPageBuilder;
+  final WidgetBuilder videoPageBuilder;
+  final WidgetBuilder albumPageBuilder;
 
   Future<void> _openSection(BuildContext context, _PortalSection section) {
     final WidgetBuilder pageBuilder = switch (section.kind) {
       _PortalSectionKind.earlyLearning => earlyLearningPageBuilder,
-      _PortalSectionKind.videos ||
-      _PortalSectionKind.albums => (_) => _PreparingSectionPage(section: section),
+      _PortalSectionKind.videos => videoPageBuilder,
+      _PortalSectionKind.albums => albumPageBuilder,
     };
 
     return Navigator.of(context).push<void>(
@@ -483,100 +490,6 @@ class _ExploreLabel extends StatelessWidget {
   }
 }
 
-class _PreparingSectionPage extends StatelessWidget {
-  const _PreparingSectionPage({required this.section});
-
-  final _PortalSection section;
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      key: Key('${section.title}子页面'),
-      body: PlayfulBackdrop(
-        child: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    IconButton(
-                      key: Key('${section.title}返回按钮'),
-                      tooltip: '返回菠萝首页',
-                      onPressed: () => Navigator.of(context).pop(),
-                      style: IconButton.styleFrom(
-                        backgroundColor: AppColors.paper.withValues(alpha: 0.94),
-                        foregroundColor: AppColors.ink,
-                        side: BorderSide(color: section.accent.withValues(alpha: 0.16)),
-                      ),
-                      icon: const Icon(Icons.arrow_back_rounded),
-                    ),
-                    const SizedBox(width: 12),
-                    Text(
-                      section.title,
-                      key: Key('${section.title}子页面标题'),
-                      style: Theme.of(context).textTheme.headlineMedium,
-                    ),
-                  ],
-                ),
-                Expanded(
-                  child: Center(
-                    child: SingleChildScrollView(
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 520),
-                        child: Padding(
-                          padding: const EdgeInsets.fromLTRB(24, 24, 24, 80),
-                          child: Column(
-                            children: [
-                              _CategoryIllustration(section: section, size: 168),
-                              const SizedBox(height: 32),
-                              Text(
-                                section.preparingTitle,
-                                textAlign: TextAlign.center,
-                                style: Theme.of(context).textTheme.headlineMedium,
-                              ),
-                              const SizedBox(height: 12),
-                              Text(
-                                section.preparingMessage,
-                                textAlign: TextAlign.center,
-                                style: Theme.of(
-                                  context,
-                                ).textTheme.bodyLarge?.copyWith(color: AppColors.mutedInk),
-                              ),
-                              const SizedBox(height: 22),
-                              DecoratedBox(
-                                decoration: BoxDecoration(
-                                  color: section.surface,
-                                  borderRadius: BorderRadius.circular(999),
-                                  border: Border.all(color: section.accent.withValues(alpha: 0.18)),
-                                ),
-                                child: Padding(
-                                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 11),
-                                  child: Text(
-                                    '小世界正在准备中',
-                                    style: Theme.of(
-                                      context,
-                                    ).textTheme.labelLarge?.copyWith(color: AppColors.ink),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 enum _PortalSectionKind { earlyLearning, videos, albums }
 
 class _PortalSection {
@@ -585,8 +498,6 @@ class _PortalSection {
     required this.routeName,
     required this.title,
     required this.description,
-    required this.preparingTitle,
-    required this.preparingMessage,
     required this.surface,
     required this.accent,
   });
@@ -595,8 +506,6 @@ class _PortalSection {
   final String routeName;
   final String title;
   final String description;
-  final String preparingTitle;
-  final String preparingMessage;
   final Color surface;
   final Color accent;
 }
@@ -607,8 +516,6 @@ const _sections = <_PortalSection>[
     routeName: '/early-learning',
     title: '菠萝早教',
     description: '听故事、学知识，让好奇心快乐长大',
-    preparingTitle: '',
-    preparingMessage: '',
     surface: AppColors.mintMist,
     accent: AppColors.teal,
   ),
@@ -617,8 +524,6 @@ const _sections = <_PortalSection>[
     routeName: '/videos',
     title: '菠萝视频',
     description: '打开欢乐小舞台，发现更多有趣画面',
-    preparingTitle: '欢乐小舞台正在布置',
-    preparingMessage: '菠萝视频会在这里和你见面，敬请期待新的快乐内容。',
     surface: AppColors.peachMist,
     accent: AppColors.coral,
   ),
@@ -627,8 +532,6 @@ const _sections = <_PortalSection>[
     routeName: '/albums',
     title: '菠萝相册',
     description: '收藏闪亮瞬间，把每份快乐好好珍藏',
-    preparingTitle: '相册星球正在收集笑脸',
-    preparingMessage: '菠萝相册会在这里珍藏美好瞬间，很快就能一起翻看啦。',
     surface: AppColors.skyMist,
     accent: AppColors.lavender,
   ),

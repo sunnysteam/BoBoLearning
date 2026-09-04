@@ -28,7 +28,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     && test "${install_succeeded}" = "1" \
     && groupadd --system --gid 10001 bobo \
     && useradd --system --uid 10001 --gid bobo --home-dir /nonexistent --shell /usr/sbin/nologin bobo \
-    && mkdir --parents /app/cover-cache /app/hls-cache /app/media /app/updates \
+    && mkdir --parents /app/baidu-auth /app/cover-cache /app/hls-cache /app/media /app/updates \
     && chown --recursive bobo:bobo /app
 
 COPY --from=builder --chown=bobo:bobo \

@@ -8,7 +8,7 @@ use axum::{
         HeaderName, HeaderValue, Method, StatusCode,
         header::{
             ACCEPT_RANGES, CACHE_CONTROL, CONTENT_DISPOSITION, CONTENT_LENGTH, CONTENT_RANGE,
-            CONTENT_TYPE, RANGE,
+            CONTENT_TYPE, ETAG, LAST_MODIFIED, RANGE,
         },
     },
     response::{IntoResponse, Redirect, Response},
@@ -21,6 +21,7 @@ use tower_http::{
     services::ServeFile,
 };
 
+use crate::baidu::{BaiduCloud, BaiduCloudError, CloudMediaKind};
 use crate::discovery::{CatalogStore, VideoEntry};
 use crate::hls::HlsManager;
 use crate::update::UpdateManifest;
@@ -32,6 +33,7 @@ pub struct AppState {
     pub catalog: CatalogStore,
     pub hls: HlsManager,
     pub update_dir: PathBuf,
+    pub baidu: Option<BaiduCloud>,
 }
 
 #[derive(Serialize)]
@@ -57,6 +59,24 @@ struct VideoResponse {
 }
 
 #[derive(Serialize)]
+struct CloudMediaListResponse {
+    items: Vec<CloudMediaResponse>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CloudMediaResponse {
+    id: String,
+    title: String,
+    file_name: String,
+    kind: &'static str,
+    size_bytes: i64,
+    modified_at: i64,
+    thumbnail_url: String,
+    content_url: String,
+}
+
+#[derive(Serialize)]
 struct ErrorEnvelope {
     error: ErrorResponse,
 }
@@ -74,6 +94,10 @@ pub fn build_router(state: AppState) -> Router {
         .route("/videos/{id}/cover", get(serve_cover))
         .route("/videos/{id}/stream", get(serve_stream))
         .route("/videos/{id}/hls/{version}/{file}", get(serve_hls_asset))
+        .route("/cloud/videos", get(list_cloud_videos))
+        .route("/cloud/photos", get(list_cloud_photos))
+        .route("/cloud/media/{id}/thumbnail", get(serve_cloud_thumbnail))
+        .route("/cloud/media/{id}/content", get(serve_cloud_content))
         .route("/app-updates/latest", get(latest_update))
         .route(
             "/app-updates/packages/{file_name}",
@@ -126,6 +150,115 @@ async fn list_videos(State(state): State<AppState>) -> Json<VideoListResponse> {
         });
     }
     Json(VideoListResponse { items })
+}
+
+async fn list_cloud_videos(State(state): State<AppState>) -> Response {
+    list_cloud_media(state, CloudMediaKind::Video).await
+}
+
+async fn list_cloud_photos(State(state): State<AppState>) -> Response {
+    list_cloud_media(state, CloudMediaKind::Photo).await
+}
+
+async fn list_cloud_media(state: AppState, kind: CloudMediaKind) -> Response {
+    let Some(baidu) = state.baidu else {
+        return baidu_disabled();
+    };
+    match baidu.list_media(kind).await {
+        Ok(entries) => {
+            let items = entries
+                .into_iter()
+                .map(|entry| {
+                    let id = entry.fs_id.to_string();
+                    CloudMediaResponse {
+                        id: id.clone(),
+                        title: entry.file_name.clone(),
+                        file_name: entry.file_name,
+                        kind: entry.kind.as_str(),
+                        size_bytes: entry.size_bytes,
+                        modified_at: entry.modified_at,
+                        thumbnail_url: format!("/api/v1/cloud/media/{id}/thumbnail"),
+                        content_url: format!("/api/v1/cloud/media/{id}/content"),
+                    }
+                })
+                .collect();
+            let mut response = Json(CloudMediaListResponse { items }).into_response();
+            response
+                .headers_mut()
+                .insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
+            response
+        }
+        Err(error) => baidu_error_response(error),
+    }
+}
+
+async fn serve_cloud_thumbnail(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    request: Request,
+) -> Response {
+    let Some(baidu) = state.baidu else {
+        return baidu_disabled();
+    };
+    let method = to_reqwest_method(request.method());
+    match baidu.proxy_thumbnail(id, method).await {
+        Ok(upstream) => proxy_baidu_response(upstream, "public, max-age=3600"),
+        Err(error) => baidu_error_response(error),
+    }
+}
+
+async fn serve_cloud_content(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    request: Request,
+) -> Response {
+    let Some(baidu) = state.baidu else {
+        return baidu_disabled();
+    };
+    let method = to_reqwest_method(request.method());
+    let range = request
+        .headers()
+        .get(RANGE)
+        .and_then(|value| value.to_str().ok());
+    match baidu.proxy_content(id, method, range).await {
+        Ok(upstream) => proxy_baidu_response(upstream, "private, max-age=300"),
+        Err(error) => baidu_error_response(error),
+    }
+}
+
+fn to_reqwest_method(method: &Method) -> reqwest::Method {
+    if *method == Method::HEAD {
+        reqwest::Method::HEAD
+    } else {
+        reqwest::Method::GET
+    }
+}
+
+fn proxy_baidu_response(upstream: reqwest::Response, cache_control: &'static str) -> Response {
+    let status = upstream.status();
+    let headers = upstream.headers().clone();
+    let mut response = Response::new(Body::from_stream(upstream.bytes_stream()));
+    *response.status_mut() = status;
+    for name in [
+        CONTENT_TYPE,
+        CONTENT_LENGTH,
+        CONTENT_RANGE,
+        ACCEPT_RANGES,
+        ETAG,
+        LAST_MODIFIED,
+    ] {
+        if let Some(value) = headers.get(&name) {
+            response.headers_mut().insert(name, value.clone());
+        }
+    }
+    response
+        .headers_mut()
+        .insert(CACHE_CONTROL, HeaderValue::from_static(cache_control));
+    response.headers_mut().insert(
+        HeaderName::from_static("x-accel-buffering"),
+        HeaderValue::from_static("no"),
+    );
+    response
 }
 
 async fn serve_cover(
@@ -293,6 +426,46 @@ fn update_not_found() -> Response {
     )
 }
 
+fn baidu_disabled() -> Response {
+    error_response(
+        StatusCode::SERVICE_UNAVAILABLE,
+        "baidu_cloud_disabled",
+        "百度网盘内容尚未启用",
+    )
+}
+
+fn baidu_error_response(error: BaiduCloudError) -> Response {
+    let (status, code, message) = match error {
+        BaiduCloudError::NotFound => (
+            StatusCode::NOT_FOUND,
+            "baidu_media_not_found",
+            "没有找到这个百度网盘文件",
+        ),
+        BaiduCloudError::Unauthorized => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "baidu_unauthorized",
+            "百度网盘授权已失效，请重新授权",
+        ),
+        BaiduCloudError::RootNotFound => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "baidu_root_not_found",
+            "百度网盘目录 /菠萝乐园 不存在",
+        ),
+        BaiduCloudError::RateLimited => (
+            StatusCode::TOO_MANY_REQUESTS,
+            "baidu_rate_limited",
+            "百度网盘访问过于频繁，请稍后再试",
+        ),
+        BaiduCloudError::Unavailable => (
+            StatusCode::BAD_GATEWAY,
+            "baidu_unavailable",
+            "百度网盘暂时不可用，请稍后再试",
+        ),
+    };
+    warn!("百度网盘请求失败：{message}");
+    error_response(status, code, message)
+}
+
 fn error_response(status: StatusCode, code: &'static str, message: &'static str) -> Response {
     (
         status,
@@ -341,6 +514,7 @@ mod tests {
             catalog: CatalogStore::new(report.catalog),
             hls,
             update_dir: updates,
+            baidu: None,
         });
         (root, app, id)
     }
@@ -396,6 +570,7 @@ mod tests {
             catalog,
             hls,
             update_dir: updates,
+            baidu: None,
         });
 
         let list_response = app
@@ -519,6 +694,30 @@ mod tests {
             .expect("请求应成功");
         assert_eq!(api_response.status(), StatusCode::NOT_FOUND);
         assert_eq!(api_response.headers()[CONTENT_TYPE], "application/json");
+    }
+
+    #[tokio::test]
+    async fn 百度网盘未启用时返回中文_503() {
+        let (_root, app, _) = test_app();
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/cloud/videos")
+                    .body(Body::empty())
+                    .expect("请求应创建成功"),
+            )
+            .await
+            .expect("请求应成功");
+
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let body = response
+            .into_body()
+            .collect()
+            .await
+            .expect("响应体应读取成功")
+            .to_bytes();
+        let text = String::from_utf8(body.to_vec()).expect("响应应为 UTF-8");
+        assert!(text.contains("百度网盘内容尚未启用"));
     }
 
     #[tokio::test]

@@ -5,7 +5,7 @@ services:
     build:
       context: .
       dockerfile: Service/Dockerfile
-    image: bobo-learning-service:0.2.3
+    image: bobo-learning-service:0.2.4
     ports:
       - "${BOBO_API_PORT:-5171}:8080"
     volumes:
@@ -28,6 +28,11 @@ services:
         read_only: true
         bind:
           create_host_path: false
+      - type: bind
+        source: ${BOBO_BAIDU_AUTH_HOST_PATH:-./Service/baidu-auth}
+        target: /app/baidu-auth
+        bind:
+          create_host_path: false
     environment:
       BOBO_BIND: 0.0.0.0:8080
       BOBO_MEDIA_DIR: /app/media
@@ -40,6 +45,12 @@ services:
       BOBO_HLS_PREWARM_LIMIT: ${BOBO_HLS_PREWARM_LIMIT:-0}
       BOBO_SCAN_DEBOUNCE_MS: 1500
       BOBO_SCAN_INTERVAL_SECS: 10
+      BOBO_BAIDU_ENABLED: ${BOBO_BAIDU_ENABLED:-false}
+      BOBO_BAIDU_ROOT_PATH: ${BOBO_BAIDU_ROOT_PATH:-/菠萝乐园}
+      BOBO_BAIDU_TOKEN_PATH: /app/baidu-auth/token.json
+      BOBO_BAIDU_CACHE_SECS: ${BOBO_BAIDU_CACHE_SECS:-60}
+      BAIDU_NETDISK_APP_KEY: ${BAIDU_NETDISK_APP_KEY:-}
+      BAIDU_NETDISK_SECRET_KEY: ${BAIDU_NETDISK_SECRET_KEY:-}
     restart: unless-stopped
     read_only: true
     tmpfs:
@@ -60,7 +71,7 @@ services:
       dockerfile: Client/Dockerfile
       args:
         API_BASE_URL: ${BOBO_PUBLIC_API_BASE_URL:-https://wx.jiayuntong.com:5172/server/}
-    image: bobo-learning-client:0.2.8
+    image: bobo-learning-client:0.2.9
     depends_on:
       service:
         condition: service_healthy
@@ -82,3 +93,11 @@ services:
 
 volumes:
   cover-cache:
+
+networks:
+  default:
+    name: bobo-learning-runtime
+    driver: bridge
+    driver_opts:
+      # 兼容部分服务器经 NAT 访问百度 HTTPS 时的路径 MTU，避免 TLS 握手分片超时。
+      com.docker.network.driver.mtu: "1400"

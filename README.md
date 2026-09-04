@@ -1,6 +1,6 @@
 # 菠萝乐园
 
-菠萝乐园是一个面向儿童的轻量内容应用，首页包含菠萝早教、菠萝视频和菠萝相册三个分类。当前可用的菠萝早教模块由 Rust 服务自动发现新增 MP4；有同名图片时使用人工封面，没有图片时通过 FFmpeg 自动截取封面。Service 在后台串行生成 HLS+CMAF 正式资产，完整落盘后自动清理对应源文件；Flutter Web 和 Android 均优先播放 HLS。客户端按原始媒体文件夹分区展示横向视频书架，并提供进度拖动、点击播放/暂停以及分类内上下滑切换。
+菠萝乐园是一个面向儿童的轻量内容应用，首页包含菠萝早教、菠萝视频和菠萝相册三个分类。菠萝早教由 Rust 服务自动发现新增 MP4；菠萝视频和菠萝相册由 Service 安全接入百度网盘 `/菠萝乐园` 并直接代理原始内容。客户端统一提供响应式内容网格、视频播放和图片大图浏览。
 
 ## 推荐部署方式
 
@@ -23,6 +23,7 @@ docker compose down
 - Client 使用 Nginx 托管 Web，并把同源 `/api`、`/healthz` 代理到 Service。
 - 宿主机 `Service/media` 作为新增内容收件箱映射到容器 `/app/media`，媒体不会进入镜像。
 - 宿主机 `Service/updates` 只读映射到容器 `/app/updates`，升级 APK 不会进入镜像。
+- 宿主机 `Service/baidu-auth` 可写映射到容器 `/app/baidu-auth`，OAuth 令牌不会进入镜像或 Git。
 - 自动封面保存在 Docker 命名卷 `/app/cover-cache`，不会修改宿主机媒体文件。
 - HLS/CMAF 正式资产由宿主机 `Service/hls-cache` 映射到 `/app/hls-cache`，可直接查看、备份和迁移。正式 Compose 默认处理收件箱中的全部新增视频；将 `BOBO_HLS_PREWARM_LIMIT` 设为正整数可限制单次排队数量。
 - 两个容器均以非 root 用户运行，根文件系统只读，并禁用新增权限。
@@ -59,6 +60,29 @@ Service/media/
 docker compose logs --follow service
 ```
 
+## 百度网盘直连
+
+百度网盘中的目标目录是“我的网盘”下的 `菠萝乐园`，开放 API 路径必须写成 `/菠萝乐园`，不能包含界面上的“我的网盘”。首版只读取这一层的直接子文件：视频进入“菠萝视频”，图片进入“菠萝相册”，两边都按原始文件名倒序展示。
+
+在 `.env` 中填写开放平台应用的 `BAIDU_NETDISK_APP_KEY`、`BAIDU_NETDISK_SECRET_KEY`，并配置：
+
+```dotenv
+BOBO_BAIDU_AUTH_HOST_PATH=./Service/baidu-auth
+BOBO_BAIDU_ENABLED=true
+BOBO_BAIDU_ROOT_PATH=/菠萝乐园
+BOBO_BAIDU_CACHE_SECS=60
+```
+
+首次启用或授权失效时运行设备码授权：
+
+```powershell
+docker compose run --rm service --authorize-baidu
+```
+
+按中文提示在浏览器确认后，令牌会写入已忽略的 `Service/baidu-auth/token.json`。Service 会在访问令牌到期前使用刷新令牌自动续期；任何百度凭证、令牌或临时下载直链都不会发给 Flutter 客户端。
+
+列表接口为 `GET /api/v1/cloud/videos` 和 `GET /api/v1/cloud/photos`。缩略图、视频和图片都经 Service 流式代理；视频接口保留 `HEAD` 与 `Range`，不进行本地下载或转码。此模式受百度网盘上游下载策略影响，大文件公网播放仍可能限速。
+
 ## 自定义端口和资源目录
 
 复制 `.env.example` 为 `.env`，按需设置：
@@ -70,15 +94,18 @@ BOBO_PUBLIC_API_BASE_URL=https://wx.jiayuntong.com:5172/server/
 BOBO_MEDIA_HOST_PATH=G:/BoBoMedia
 BOBO_HLS_HOST_PATH=G:/BoBoHlsAssets
 BOBO_UPDATE_HOST_PATH=G:/BoBoUpdates
+BOBO_BAIDU_AUTH_HOST_PATH=./Service/baidu-auth
 BOBO_COVER_CAPTURE_SECS=3
 BOBO_HLS_PREWARM_LIMIT=0
 ```
 
 APK 与 Web 的默认正式服务根地址均为 `https://wx.jiayuntong.com:5172/server/`，客户端会自动补齐 `api/v1/`。外层 Nginx 的 `/server/` 会去掉此前缀并转发到 Rust Service。`BOBO_PUBLIC_API_BASE_URL` 可在构建 Web 镜像时覆盖该地址。
 
-`BOBO_MEDIA_HOST_PATH`、`BOBO_HLS_HOST_PATH` 和 `BOBO_UPDATE_HOST_PATH` 必须指向已经存在的目录。Compose 不会替你创建目录，路径错误会直接启动失败，从而避免误挂载空目录。Windows Docker Desktop 需允许 Docker 访问对应盘符。
+`BOBO_MEDIA_HOST_PATH`、`BOBO_HLS_HOST_PATH`、`BOBO_UPDATE_HOST_PATH` 和 `BOBO_BAIDU_AUTH_HOST_PATH` 必须指向已经存在的目录。Compose 不会替你创建目录，路径错误会直接启动失败，从而避免误挂载空目录。Windows Docker Desktop 需允许 Docker 访问对应盘符。
 
 自动封面中间缓存由 Compose 命名卷 `cover-cache` 持久化；HLS/CMAF 正式资产使用 `BOBO_HLS_HOST_PATH` 指向的宿主机目录。`docker compose down --volumes` 只会删除自动封面缓存，不会删除正式资产 bind mount。
+
+Compose 为本项目的默认 bridge 网络固定使用 `1400` MTU，用于兼容部分服务器经 Docker NAT 访问百度 HTTPS 时的 TLS 握手分片问题；该设置仅作用于本项目网络，不修改 Docker 全局网络配置。
 
 ## Android 调试
 
@@ -169,6 +196,8 @@ Invoke-RestMethod http://localhost:5170/healthz
 Invoke-RestMethod http://localhost:5170/api/v1/videos
 Invoke-RestMethod http://localhost:5171/healthz
 Invoke-RestMethod http://localhost:5171/api/v1/videos
+Invoke-RestMethod http://localhost:5171/api/v1/cloud/videos
+Invoke-RestMethod http://localhost:5171/api/v1/cloud/photos
 Invoke-WebRequest http://localhost:5171/api/v1/app-updates/latest -SkipHttpErrorCheck
 ```
 

@@ -1,9 +1,14 @@
 import 'package:bobo_learning/config/app_config.dart';
 import 'package:bobo_learning/data/repositories/app_update_repository_impl.dart';
+import 'package:bobo_learning/data/repositories/cloud_media_repository_impl.dart';
 import 'package:bobo_learning/data/repositories/video_repository_impl.dart';
 import 'package:bobo_learning/data/services/app_update_api_service.dart';
+import 'package:bobo_learning/data/services/cloud_media_api_service.dart';
 import 'package:bobo_learning/data/services/video_api_service.dart';
+import 'package:bobo_learning/domain/models/cloud_media_item.dart';
 import 'package:bobo_learning/ui/core/app_theme.dart';
+import 'package:bobo_learning/ui/features/cloud/view_models/cloud_media_view_model.dart';
+import 'package:bobo_learning/ui/features/cloud/views/cloud_media_page.dart';
 import 'package:bobo_learning/ui/features/home/view_models/home_view_model.dart';
 import 'package:bobo_learning/ui/features/home/views/home_page.dart';
 import 'package:bobo_learning/ui/features/player/services/playback_controller.dart';
@@ -27,6 +32,8 @@ class BoBoLearningApp extends StatefulWidget {
 class _BoBoLearningAppState extends State<BoBoLearningApp> with WidgetsBindingObserver {
   late final http.Client _httpClient;
   late final HomeViewModel _homeViewModel;
+  late final CloudMediaViewModel _cloudVideoViewModel;
+  late final CloudMediaViewModel _cloudAlbumViewModel;
   late final AppUpdateViewModel _appUpdateViewModel;
   final PlaybackControllerFactory _playbackControllerFactory = const VideoPlayerControllerFactory();
 
@@ -41,6 +48,18 @@ class _BoBoLearningAppState extends State<BoBoLearningApp> with WidgetsBindingOb
     );
     _homeViewModel = HomeViewModel(
       repository: VideoRepositoryImpl(apiService: apiService, config: widget.config),
+    );
+    final cloudRepository = CloudMediaRepositoryImpl(
+      apiService: CloudMediaApiService(client: _httpClient, apiBaseUri: widget.config.apiBaseUri),
+      config: widget.config,
+    );
+    _cloudVideoViewModel = CloudMediaViewModel(
+      repository: cloudRepository,
+      kind: CloudMediaKind.video,
+    );
+    _cloudAlbumViewModel = CloudMediaViewModel(
+      repository: cloudRepository,
+      kind: CloudMediaKind.photo,
     );
     _appUpdateViewModel = AppUpdateViewModel(
       repository: AppUpdateRepositoryImpl(
@@ -63,6 +82,8 @@ class _BoBoLearningAppState extends State<BoBoLearningApp> with WidgetsBindingOb
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _appUpdateViewModel.dispose();
+    _cloudVideoViewModel.dispose();
+    _cloudAlbumViewModel.dispose();
     _homeViewModel.dispose();
     _httpClient.close();
     super.dispose();
@@ -82,6 +103,11 @@ class _BoBoLearningAppState extends State<BoBoLearningApp> with WidgetsBindingOb
             playbackControllerFactory: _playbackControllerFactory,
             viewModel: _homeViewModel,
           ),
+          videoPageBuilder: (_) => CloudVideoPage(
+            viewModel: _cloudVideoViewModel,
+            playbackControllerFactory: _playbackControllerFactory,
+          ),
+          albumPageBuilder: (_) => CloudAlbumPage(viewModel: _cloudAlbumViewModel),
         ),
       ),
     );
