@@ -3,6 +3,7 @@ import 'package:bobo_learning/domain/models/video_item.dart';
 import 'package:bobo_learning/ui/core/app_theme.dart';
 import 'package:bobo_learning/ui/core/playful_backdrop.dart';
 import 'package:bobo_learning/ui/features/cloud/view_models/cloud_media_view_model.dart';
+import 'package:bobo_learning/ui/features/cloud/views/photo_viewer_page.dart';
 import 'package:bobo_learning/ui/features/home/widgets/video_card.dart';
 import 'package:bobo_learning/ui/features/player/services/playback_controller.dart';
 import 'package:bobo_learning/ui/features/player/view_models/player_view_model.dart';
@@ -134,15 +135,20 @@ class _CloudMediaPageState extends State<_CloudMediaPage> {
       initialIndex: index,
       controllerFactory: widget.playbackControllerFactory!,
     );
-    await Navigator.of(
-      context,
-    ).push<void>(MaterialPageRoute<void>(builder: (_) => PlayerPage(viewModel: viewModel)));
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => PlayerPage(viewModel: viewModel, title: '菠萝视频'),
+      ),
+    );
   }
 
-  Future<void> _openPhoto(CloudMediaItem item) {
-    return Navigator.of(
-      context,
-    ).push<void>(MaterialPageRoute<void>(builder: (_) => _PhotoViewerPage(item: item)));
+  Future<void> _openPhoto(int index) {
+    final items = List<CloudMediaItem>.of(widget.viewModel.items);
+    return Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => PhotoViewerPage(items: items, initialIndex: index),
+      ),
+    );
   }
 
   @override
@@ -260,7 +266,7 @@ class _CloudMediaPageState extends State<_CloudMediaPage> {
                 key: ValueKey(item.id),
                 item: item,
                 colorIndex: index,
-                onTap: () => _openPhoto(item),
+                onTap: () => _openPhoto(index),
               );
             }, childCount: widget.viewModel.items.length),
           ),
@@ -322,9 +328,8 @@ class _CloudHeader extends StatelessWidget {
               ),
               Text(
                 '$count 项 · 文件名倒序',
-                style: Theme.of(
-                  context,
-                ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+                style: Theme.of(context).textTheme.bodyMedium
+                    ?.copyWith(fontWeight: FontWeight.w600),
               ),
             ],
           ),
@@ -394,10 +399,8 @@ class _CloudMessage extends StatelessWidget {
               Text(
                 message,
                 textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                  color: AppColors.mutedInk,
-                  fontWeight: FontWeight.w600,
-                ),
+                style: Theme.of(context).textTheme.bodyLarge
+                    ?.copyWith(color: AppColors.mutedInk, fontWeight: FontWeight.w600),
               ),
               if (action != null) ...[const SizedBox(height: 24), action!],
             ],
@@ -457,59 +460,11 @@ class _PhotoCard extends StatelessWidget {
                   item.fileName,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    color: AppColors.ink,
-                    fontWeight: FontWeight.w700,
-                  ),
+                  style: Theme.of(context).textTheme.titleSmall
+                      ?.copyWith(color: AppColors.ink, fontWeight: FontWeight.w700),
                 ),
               ),
             ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _PhotoViewerPage extends StatelessWidget {
-  const _PhotoViewerPage({required this.item});
-
-  final CloudMediaItem item;
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      key: const Key('相册大图页'),
-      backgroundColor: AppColors.player,
-      appBar: AppBar(
-        backgroundColor: AppColors.player,
-        foregroundColor: Colors.white,
-        title: Text(item.fileName, maxLines: 1, overflow: TextOverflow.ellipsis),
-      ),
-      body: SafeArea(
-        top: false,
-        child: Center(
-          child: InteractiveViewer(
-            minScale: 0.8,
-            maxScale: 5,
-            child: Hero(
-              tag: '相册-${item.id}',
-              child: Image.network(
-                item.contentUri.toString(),
-                fit: BoxFit.contain,
-                loadingBuilder: (context, child, progress) => progress == null
-                    ? child
-                    : const Center(child: CircularProgressIndicator(color: Colors.white)),
-                errorBuilder: (context, error, stackTrace) => const Padding(
-                  padding: EdgeInsets.all(32),
-                  child: Text(
-                    '这张图片暂时加载失败，请返回后重试',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: Colors.white70, fontSize: 16),
-                  ),
-                ),
-              ),
-            ),
           ),
         ),
       ),

@@ -111,6 +111,10 @@ impl MediaScanner {
         &self.media_dir
     }
 
+    pub fn hls_cache_dir(&self) -> &Path {
+        &self.hls_cache_dir
+    }
+
     pub fn scan(&self) -> Result<ScanReport> {
         let mut incoming = scan_media_with_resolver(&self.media_dir, Some(&self.cover_resolver))?;
         let (published, published_warnings) = scan_published_assets(&self.hls_cache_dir)?;
@@ -326,7 +330,7 @@ fn scan_media_with_resolver(
 }
 
 /// 从已发布 HLS 资产恢复目录；这里不会再次触发转码。
-fn scan_published_assets(cache_dir: &Path) -> Result<(Vec<VideoEntry>, Vec<String>)> {
+pub(crate) fn scan_published_assets(cache_dir: &Path) -> Result<(Vec<VideoEntry>, Vec<String>)> {
     let root = cache_dir
         .canonicalize()
         .with_context(|| format!("无法规范化 HLS 资产目录：{}", cache_dir.display()))?;
@@ -337,9 +341,11 @@ fn scan_published_assets(cache_dir: &Path) -> Result<(Vec<VideoEntry>, Vec<Strin
     let mut warnings = Vec::new();
     let mut by_id = HashMap::<String, (u128, VideoEntry)>::new();
     for result in WalkDir::new(&root)
-        .min_depth(3)
-        .max_depth(3)
         .follow_links(false)
+        .into_iter()
+        .filter_entry(|entry| {
+            entry.depth() == 0 || !entry.file_name().to_string_lossy().starts_with('.')
+        })
     {
         let entry = match result {
             Ok(entry) => entry,
@@ -382,7 +388,8 @@ fn scan_published_assets(cache_dir: &Path) -> Result<(Vec<VideoEntry>, Vec<Strin
     ))
 }
 
-fn parse_published_asset(root: &Path, manifest_path: &Path) -> Result<VideoEntry> {
+pub(crate) fn parse_published_asset(root: &Path, manifest_path: &Path) -> Result<VideoEntry> {
+    crate::asset_layout::ensure_contained(root, manifest_path)?;
     let bytes = fs::read(manifest_path)
         .with_context(|| format!("无法读取资产元数据：{}", manifest_path.display()))?;
     let manifest: PublishedAssetManifest = serde_json::from_slice(&bytes)
@@ -407,8 +414,12 @@ fn parse_published_asset(root: &Path, manifest_path: &Path) -> Result<VideoEntry
     if actual_id != manifest.id || actual_version != manifest.version {
         bail!("资产元数据与所在目录不匹配");
     }
-    if id_dir.parent() != Some(root) {
-        bail!("资产目录层级无效");
+    crate::asset_layout::validate_category(&manifest.folder_path, &manifest.relative_video_path)?;
+    crate::asset_layout::validate_component(&manifest.version)?;
+    let grouped_dir =
+        crate::asset_layout::grouped_video_dir(root, &manifest.folder_path, &manifest.id)?;
+    if id_dir.parent() != Some(root) && id_dir != grouped_dir {
+        bail!("资产所在分类目录与元数据不一致");
     }
 
     let cover_name = Path::new(&manifest.cover_file);
@@ -418,6 +429,13 @@ fn parse_published_asset(root: &Path, manifest_path: &Path) -> Result<VideoEntry
         bail!("资产封面文件名无效");
     }
     let cover_path = version_dir.join(cover_name);
+    for path in [
+        &cover_path,
+        &version_dir.join("index.m3u8"),
+        &version_dir.join("init.mp4"),
+    ] {
+        crate::asset_layout::ensure_contained(root, path)?;
+    }
     if !is_readable_nonempty_file(&cover_path)
         || !is_readable_nonempty_file(&version_dir.join("index.m3u8"))
         || !is_readable_nonempty_file(&version_dir.join("init.mp4"))
@@ -432,6 +450,7 @@ fn parse_published_asset(root: &Path, manifest_path: &Path) -> Result<VideoEntry
             let name = name.to_string_lossy();
             name.starts_with("seg_")
                 && name.ends_with(".m4s")
+                && crate::asset_layout::ensure_contained(root, &entry.path()).is_ok()
                 && is_readable_nonempty_file(&entry.path())
         });
     if !has_segment {
@@ -540,7 +559,7 @@ fn relative_text(root: &Path, path: &Path) -> String {
         .replace('\\', "/")
 }
 
-fn stable_id(relative_path: &str) -> String {
+pub(crate) fn stable_id(relative_path: &str) -> String {
     let digest = Sha256::digest(relative_path.as_bytes());
     let mut id = String::with_capacity(32);
     for byte in &digest[..16] {

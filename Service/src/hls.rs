@@ -17,6 +17,9 @@ use tokio::{
 };
 use tracing::{error, info, warn};
 
+use crate::asset_layout::{
+    ensure_contained, grouped_video_dir, validate_category, validate_component,
+};
 use crate::discovery::{
     PUBLISHED_ASSET_FILE, PUBLISHED_ASSET_SCHEMA_VERSION, PublishedAssetManifest, VideoEntry,
 };
@@ -56,12 +59,14 @@ pub struct HlsSnapshot {
 struct HlsState {
     version: String,
     status: HlsStatus,
+    asset_dir: PathBuf,
 }
 
 #[derive(Clone, Debug)]
 struct HlsJob {
     entry: Arc<VideoEntry>,
     version: String,
+    asset_dir: PathBuf,
 }
 
 /// HLS/CMAF 转码器，测试中可替换为轻量实现。
@@ -190,6 +195,9 @@ impl HlsManager {
     ) -> Result<(Self, JoinHandle<()>)> {
         fs::create_dir_all(&cache_dir)
             .with_context(|| format!("无法创建 HLS 缓存目录：{}", cache_dir.display()))?;
+        let cache_dir = cache_dir
+            .canonicalize()
+            .context("无法规范化 HLS 资产目录")?;
         let (sender, receiver) = mpsc::channel(64);
         let states = Arc::new(RwLock::new(HashMap::new()));
         let manager = Self {
@@ -209,13 +217,16 @@ impl HlsManager {
             let Some(version) = entry.published_hls_version.as_ref() else {
                 continue;
             };
-            let asset_dir = self.asset_dir(&entry.id, version);
+            let Some(asset_dir) = self.published_asset_dir(entry) else {
+                continue;
+            };
             if validate_published_asset(&asset_dir).is_ok() {
                 states.insert(
                     entry.id.clone(),
                     HlsState {
                         version: version.clone(),
                         status: HlsStatus::Ready,
+                        asset_dir,
                     },
                 );
             }
@@ -227,7 +238,9 @@ impl HlsManager {
         let mut incoming_count = 0usize;
         for entry in entries {
             if let Some(version) = entry.published_hls_version.as_ref() {
-                let asset_dir = self.asset_dir(&entry.id, version);
+                let Some(asset_dir) = self.published_asset_dir(entry) else {
+                    continue;
+                };
                 let status = if validate_published_asset(&asset_dir).is_ok() {
                     HlsStatus::Ready
                 } else {
@@ -238,6 +251,7 @@ impl HlsManager {
                     HlsState {
                         version: version.clone(),
                         status,
+                        asset_dir,
                     },
                 );
                 continue;
@@ -260,8 +274,28 @@ impl HlsManager {
                     continue;
                 }
             };
-            let final_dir = self.asset_dir(&entry.id, &version);
-            if validate_output(&final_dir).is_ok() {
+            let final_dir = match self.incoming_asset_dir(entry, &version) {
+                Ok(path) => path,
+                Err(error) => {
+                    error!(
+                        "视频分类路径无效，已跳过 {}：{error:#}",
+                        entry.relative_video_path
+                    );
+                    continue;
+                }
+            };
+            // 兼容尚未整理的旧分片；只接管现有完整产物，不自动移动正式资产。
+            let legacy_dir = self.cache_dir.join(&entry.id).join(&version);
+            let existing_dir = if validate_output(&final_dir).is_ok() {
+                Some(final_dir.clone())
+            } else if ensure_contained(&self.cache_dir, &legacy_dir).is_ok()
+                && validate_output(&legacy_dir).is_ok()
+            {
+                Some(legacy_dir)
+            } else {
+                None
+            };
+            if let Some(final_dir) = existing_dir {
                 match finalize_existing_asset(&final_dir, entry, &version) {
                     Ok(()) => {
                         self.states.write().await.insert(
@@ -269,6 +303,7 @@ impl HlsManager {
                             HlsState {
                                 version: version.clone(),
                                 status: HlsStatus::Ready,
+                                asset_dir: final_dir,
                             },
                         );
                         cleanup_incoming_source(entry);
@@ -283,6 +318,7 @@ impl HlsManager {
                             HlsState {
                                 version,
                                 status: HlsStatus::Failed,
+                                asset_dir: final_dir,
                             },
                         );
                     }
@@ -300,6 +336,7 @@ impl HlsManager {
                             HlsState {
                                 version: version.clone(),
                                 status: HlsStatus::Processing,
+                                asset_dir: final_dir.clone(),
                             },
                         );
                         true
@@ -313,6 +350,7 @@ impl HlsManager {
             let job = HlsJob {
                 entry: Arc::clone(entry),
                 version,
+                asset_dir: final_dir,
             };
             if let Err(send_error) = self.sender.send(job).await {
                 error!(
@@ -353,7 +391,8 @@ impl HlsManager {
         if state.status != HlsStatus::Ready || state.version != version {
             return None;
         }
-        let path = self.asset_dir(id, version).join(file);
+        let path = state.asset_dir.join(file);
+        ensure_contained(&self.cache_dir, &path).ok()?;
         is_readable_nonempty_file(&path).then_some(path)
     }
 
@@ -364,16 +403,28 @@ impl HlsManager {
         if state.status != HlsStatus::Ready {
             return None;
         }
-        published_cover_path(&self.asset_dir(id, &state.version)).ok()
+        let path = published_cover_path(&state.asset_dir).ok()?;
+        ensure_contained(&self.cache_dir, &path).ok()?;
+        Some(path)
     }
 
-    fn asset_dir(&self, id: &str, version: &str) -> PathBuf {
-        self.cache_dir.join(id).join(version)
+    fn published_asset_dir(&self, entry: &VideoEntry) -> Option<PathBuf> {
+        let path = entry.cover_path.parent()?.to_path_buf();
+        ensure_contained(&self.cache_dir, &path).ok()?;
+        Some(path)
+    }
+
+    fn incoming_asset_dir(&self, entry: &VideoEntry, version: &str) -> Result<PathBuf> {
+        validate_category(&entry.folder_path, &entry.relative_video_path)?;
+        validate_component(version)?;
+        let path = grouped_video_dir(&self.cache_dir, &entry.folder_path, &entry.id)?.join(version);
+        ensure_contained(&self.cache_dir, &path)?;
+        Ok(path)
     }
 
     #[cfg(test)]
     pub async fn publish_test_asset(&self, id: &str, version: &str) -> Result<()> {
-        let output_dir = self.asset_dir(id, version);
+        let output_dir = self.cache_dir.join(id).join(version);
         fs::create_dir_all(&output_dir)?;
         fs::write(output_dir.join(PLAYLIST_FILE), "#EXTM3U\n#EXT-X-ENDLIST\n")?;
         fs::write(output_dir.join(INIT_FILE), b"init")?;
@@ -383,6 +434,7 @@ impl HlsManager {
             HlsState {
                 version: version.to_owned(),
                 status: HlsStatus::Ready,
+                asset_dir: output_dir,
             },
         );
         Ok(())
@@ -445,17 +497,19 @@ async fn run_worker(
 }
 
 fn generate_atomically(cache_dir: &Path, job: &HlsJob, generator: &dyn HlsGenerator) -> Result<()> {
-    let parent_dir = cache_dir.join(&job.entry.id);
-    fs::create_dir_all(&parent_dir)
+    ensure_contained(cache_dir, &job.asset_dir)?;
+    let parent_dir = job.asset_dir.parent().context("HLS 资产缺少视频目录")?;
+    fs::create_dir_all(parent_dir)
         .with_context(|| format!("无法创建视频 HLS 缓存目录：{}", parent_dir.display()))?;
-    let final_dir = parent_dir.join(&job.version);
-    if validate_output(&final_dir).is_ok() {
-        finalize_existing_asset(&final_dir, &job.entry, &job.version)?;
+    let final_dir = &job.asset_dir;
+    if validate_output(final_dir).is_ok() {
+        finalize_existing_asset(final_dir, &job.entry, &job.version)?;
         cleanup_incoming_source(&job.entry);
         return Ok(());
     }
 
     let temporary_dir = parent_dir.join(format!(".{}.tmp", job.version));
+    ensure_contained(cache_dir, &temporary_dir)?;
     remove_dir_if_exists(&temporary_dir)?;
     fs::create_dir_all(&temporary_dir)
         .with_context(|| format!("无法创建 HLS 临时目录：{}", temporary_dir.display()))?;
@@ -472,17 +526,50 @@ fn generate_atomically(cache_dir: &Path, job: &HlsJob, generator: &dyn HlsGenera
     write_published_asset(&temporary_dir, &job.entry, &job.version)?;
     validate_output(&temporary_dir)?;
     validate_published_asset(&temporary_dir)?;
-    remove_dir_if_exists(&final_dir)?;
-    fs::rename(&temporary_dir, &final_dir).with_context(|| {
+    remove_dir_if_exists(final_dir)?;
+    fs::rename(&temporary_dir, final_dir).with_context(|| {
         format!(
             "无法原子发布 HLS 缓存：{} -> {}",
             temporary_dir.display(),
             final_dir.display()
         )
     })?;
-    remove_stale_versions(&parent_dir, &job.version);
+    remove_stale_versions(parent_dir, &job.version);
+    remove_superseded_legacy_asset(cache_dir, &job.entry);
     cleanup_incoming_source(&job.entry);
     Ok(())
+}
+
+/// 重新投放同一路径并发布新版后，旧布局的旧版本也必须失效，防止下架分类后旧内容复现。
+fn remove_superseded_legacy_asset(cache_dir: &Path, entry: &VideoEntry) {
+    let legacy_dir = cache_dir.join(&entry.id);
+    if !legacy_dir.exists() {
+        return;
+    }
+    let result = (|| -> Result<()> {
+        ensure_contained(cache_dir, &legacy_dir)?;
+        for version in fs::read_dir(&legacy_dir)? {
+            let version = version?;
+            let old = crate::discovery::parse_published_asset(
+                cache_dir,
+                &version.path().join(PUBLISHED_ASSET_FILE),
+            )?;
+            if old.relative_video_path != entry.relative_video_path {
+                bail!("旧版本不属于当前视频，拒绝清理");
+            }
+            // 清理前检查全部子项，不能把未知文件或链接当作旧版本递归删除。
+            for child in walkdir::WalkDir::new(version.path()).follow_links(false) {
+                ensure_contained(cache_dir, child?.path())?;
+            }
+        }
+        fs::remove_dir_all(&legacy_dir).context("无法清理已被新版替代的旧布局版本")
+    })();
+    if let Err(error) = result {
+        warn!(
+            "新版已发布，但旧布局版本需人工核对 {}：{error:#}",
+            legacy_dir.display()
+        );
+    }
 }
 
 fn finalize_existing_asset(output_dir: &Path, entry: &VideoEntry, version: &str) -> Result<()> {
@@ -626,7 +713,10 @@ fn remove_stale_versions(parent_dir: &Path, active_version: &str) {
         return;
     };
     for entry in entries.filter_map(Result::ok) {
-        if entry.file_name() == active_version || !entry.path().is_dir() {
+        if entry.file_name() == active_version
+            || !entry.file_type().is_ok_and(|kind| kind.is_dir())
+            || ensure_contained(parent_dir, &entry.path()).is_err()
+        {
             continue;
         }
         if let Err(error) = fs::remove_dir_all(entry.path()) {
@@ -799,7 +889,8 @@ mod tests {
             .resolve_asset_path("video-1", &version, PLAYLIST_FILE)
             .await;
         assert!(playlist.is_some());
-        let asset_dir = manager.asset_dir("video-1", &version);
+        let asset_dir = manager.incoming_asset_dir(&entry, &version).unwrap();
+        assert!(asset_dir.ends_with(Path::new("未分类").join("video-1").join(&version)));
         assert!(asset_dir.join(PUBLISHED_ASSET_FILE).is_file());
         assert!(asset_dir.join("cover.png").is_file());
         assert!(!entry.video_path.as_ref().expect("应有源视频").exists());
@@ -834,6 +925,131 @@ mod tests {
         assert!(output_dir.join("cover.png").is_file());
         assert!(!entry.video_path.as_ref().expect("应有源视频").exists());
         assert!(!entry.cover_path.exists());
+    }
+
+    #[tokio::test]
+    async fn 嵌套分类转码后重启恢复封面与分片且不重复转码() {
+        let root = tempdir().unwrap();
+        let cache = root.path().join("hls-cache");
+        let generator = Arc::new(FakeGenerator::default());
+        let (_stop_tx, stop_rx) = watch::channel(false);
+        let (manager, _worker) =
+            HlsManager::start_with_generator(cache.clone(), 0, generator.clone(), stop_rx.clone())
+                .unwrap();
+        let mut entry = Arc::unwrap_or_clone(video_entry(root.path(), "video-1"));
+        entry.folder_path = "早教/佩奇 英语".to_owned();
+        entry.relative_video_path = "早教/佩奇 英语/第一集.mp4".to_owned();
+        entry.id = crate::discovery::stable_id(&entry.relative_video_path);
+        let entry = Arc::new(entry);
+        manager.enqueue_entries(std::slice::from_ref(&entry)).await;
+        wait_for_status(&manager, &entry.id, HlsStatus::Ready).await;
+        let version = manager.snapshot(&entry.id).await.version.unwrap();
+        let path = manager
+            .resolve_asset_path(&entry.id, &version, PLAYLIST_FILE)
+            .await
+            .unwrap();
+        assert!(
+            path.ends_with(
+                Path::new("早教/佩奇 英语")
+                    .join(&entry.id)
+                    .join(&version)
+                    .join(PLAYLIST_FILE)
+            )
+        );
+        let (entries, warnings) = crate::discovery::scan_published_assets(&cache).unwrap();
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert_eq!(entries.len(), 1);
+        let entries: Vec<_> = entries.into_iter().map(Arc::new).collect();
+        let (restarted, _worker) =
+            HlsManager::start_with_generator(cache, 0, generator.clone(), stop_rx).unwrap();
+        restarted.restore_published_entries(&entries).await;
+        restarted.enqueue_entries(&entries).await;
+        assert_eq!(
+            restarted
+                .resolve_asset_path(&entry.id, &version, PLAYLIST_FILE)
+                .await,
+            Some(path)
+        );
+        assert!(
+            restarted
+                .resolve_cover_path(&entry.id)
+                .await
+                .unwrap()
+                .is_file()
+        );
+        assert_eq!(generator.calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn 新旧布局恢复均不转码且使用真实资产路径() {
+        let temporary = tempdir().unwrap();
+        let cache = temporary.path().canonicalize().unwrap();
+        let old_version = crate::hls_migration::tests::create_legacy(&cache, "课程/第一集.mp4");
+        let grouped_version = crate::hls_migration::tests::create_legacy(&cache, "课程/第二集.mp4");
+        let grouped_parent = grouped_video_dir(
+            &cache,
+            "课程",
+            &crate::discovery::stable_id("课程/第二集.mp4"),
+        )
+        .unwrap();
+        fs::create_dir_all(grouped_parent.parent().unwrap()).unwrap();
+        fs::rename(grouped_version.parent().unwrap(), &grouped_parent).unwrap();
+        let (entries, warnings) = crate::discovery::scan_published_assets(&cache).unwrap();
+        assert!(warnings.is_empty());
+        assert_eq!(entries.len(), 2);
+        let entries: Vec<_> = entries.into_iter().map(Arc::new).collect();
+        let generator = Arc::new(FakeGenerator::default());
+        let (_stop_tx, stop_rx) = watch::channel(false);
+        let (manager, _worker) =
+            HlsManager::start_with_generator(cache, 0, generator.clone(), stop_rx).unwrap();
+        manager.restore_published_entries(&entries).await;
+        manager.enqueue_entries(&entries).await;
+        for entry in &entries {
+            let path = manager
+                .resolve_asset_path(&entry.id, "version-1", PLAYLIST_FILE)
+                .await
+                .unwrap();
+            assert_eq!(path.parent(), entry.cover_path.parent());
+        }
+        assert!(old_version.exists());
+        assert_eq!(generator.calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn 旧布局视频重新投放发布后不会留下可复现的旧版本() {
+        let root = tempdir().unwrap();
+        let cache = root.path().join("hls-cache");
+        let legacy = crate::hls_migration::tests::create_legacy(&cache, "课程/第一集.mp4");
+        let mut entry = Arc::unwrap_or_clone(video_entry(root.path(), "video-1"));
+        entry.folder_path = "课程".to_owned();
+        entry.relative_video_path = "课程/第一集.mp4".to_owned();
+        entry.id = crate::discovery::stable_id(&entry.relative_video_path);
+        let entry = Arc::new(entry);
+        let (_stop_tx, stop_rx) = watch::channel(false);
+        let (manager, _worker) = HlsManager::start_with_generator(
+            cache.clone(),
+            0,
+            Arc::new(FakeGenerator::default()),
+            stop_rx,
+        )
+        .unwrap();
+        manager.enqueue_entries(std::slice::from_ref(&entry)).await;
+        wait_for_status(&manager, &entry.id, HlsStatus::Ready).await;
+        assert!(!legacy.exists());
+        assert_eq!(
+            crate::discovery::scan_published_assets(&cache)
+                .unwrap()
+                .0
+                .len(),
+            1
+        );
+        fs::remove_dir_all(cache.join("课程")).unwrap();
+        assert!(
+            crate::discovery::scan_published_assets(&cache)
+                .unwrap()
+                .0
+                .is_empty()
+        );
     }
 
     #[tokio::test]

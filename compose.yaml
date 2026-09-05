@@ -5,7 +5,7 @@ services:
     build:
       context: .
       dockerfile: Service/Dockerfile
-    image: bobo-learning-service:0.2.4
+    image: bobo-learning-service:0.2.5
     ports:
       - "${BOBO_API_PORT:-5171}:8080"
     volumes:
@@ -71,7 +71,7 @@ services:
       dockerfile: Client/Dockerfile
       args:
         API_BASE_URL: ${BOBO_PUBLIC_API_BASE_URL:-https://wx.jiayuntong.com:5172/server/}
-    image: bobo-learning-client:0.2.9
+    image: bobo-learning-client:0.2.11
     depends_on:
       service:
         condition: service_healthy

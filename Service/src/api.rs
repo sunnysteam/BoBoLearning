@@ -630,6 +630,117 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn 分类资产重启后保持原播放地址且支持封面与分片范围请求() {
+        let temporary = tempdir().unwrap();
+        let root = temporary.path().canonicalize().unwrap();
+        let legacy = crate::hls_migration::tests::create_legacy(&root, "早教/佩奇 英语/第一集.mp4");
+        let id = crate::discovery::stable_id("早教/佩奇 英语/第一集.mp4");
+        let target = crate::asset_layout::grouped_video_dir(&root, "早教/佩奇 英语", &id).unwrap();
+        fs::create_dir_all(target.parent().unwrap()).unwrap();
+        fs::rename(legacy.parent().unwrap(), &target).unwrap();
+        let (entries, warnings) = crate::discovery::scan_published_assets(&root).unwrap();
+        assert!(warnings.is_empty());
+        let catalog = CatalogStore::new(crate::discovery::Catalog::new(entries));
+        let (_stop_tx, stop_rx) = watch::channel(false);
+        let (hls, _worker) =
+            HlsManager::start(root.clone(), "不存在的转码器".into(), 0, stop_rx).unwrap();
+        hls.restore_published_entries(catalog.snapshot().await.entries())
+            .await;
+        hls.enqueue_entries(catalog.snapshot().await.entries())
+            .await;
+        let app = build_router(AppState {
+            catalog: catalog.clone(),
+            hls,
+            update_dir: root.join("updates"),
+            baidu: None,
+        });
+        let playlist_url = format!("/api/v1/videos/{id}/hls/version-1/index.m3u8");
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/videos")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let text = String::from_utf8(body.to_vec()).unwrap();
+        assert!(text.contains(&playlist_url));
+        assert!(text.contains("\"hlsStatus\":\"ready\""));
+        assert!(text.contains("早教/佩奇 英语"));
+        for url in [&playlist_url, &format!("/api/v1/videos/{id}/cover")] {
+            let response = app
+                .clone()
+                .oneshot(Request::builder().uri(url).body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            assert!(
+                !response
+                    .into_body()
+                    .collect()
+                    .await
+                    .unwrap()
+                    .to_bytes()
+                    .is_empty()
+            );
+        }
+        let segment_url = format!("/api/v1/videos/{id}/hls/version-1/seg_00000.m4s");
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(&segment_url)
+                    .header(RANGE, "bytes=0-3")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::PARTIAL_CONTENT);
+        assert_eq!(
+            response
+                .into_body()
+                .collect()
+                .await
+                .unwrap()
+                .to_bytes()
+                .len(),
+            4
+        );
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(&playlist_url)
+                    .method(Method::HEAD)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        fs::remove_dir_all(root.join("早教")).unwrap();
+        catalog
+            .replace(crate::discovery::Catalog::new(
+                crate::discovery::scan_published_assets(&root).unwrap().0,
+            ))
+            .await;
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri(&segment_url)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
     async fn 视频接口支持_range_与_head() {
         let (_root, app, id) = test_app();
         let range_response = app

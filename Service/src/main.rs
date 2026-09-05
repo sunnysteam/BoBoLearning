@@ -1,15 +1,17 @@
 mod api;
+mod asset_layout;
 mod baidu;
 mod config;
 mod cover;
 mod discovery;
 mod hls;
+mod hls_migration;
 mod monitor;
 mod update;
 
 use std::{process::ExitCode, sync::Arc};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use api::{AppState, build_router};
 use baidu::BaiduCloud;
 use config::AppConfig;
@@ -33,11 +35,21 @@ async fn main() -> ExitCode {
 }
 
 async fn run() -> Result<()> {
-    if std::env::args().any(|argument| argument == "--authorize-baidu") {
+    let arguments: Vec<_> = std::env::args_os().skip(1).collect();
+    if let Some(arguments) = hls_migration::parse_arguments(arguments.iter().cloned())? {
+        return hls_migration::run(arguments);
+    }
+    if arguments.len() == 1 && arguments[0] == "--authorize-baidu" {
         return baidu::authorize_from_env().await;
+    }
+    if !arguments.is_empty() {
+        bail!(
+            "不支持的启动参数；支持 --authorize-baidu 或 --migrate-hls-folders <资产库路径> [--apply --service-stopped]"
+        );
     }
 
     let config = AppConfig::from_env()?;
+    let _asset_library_lock = asset_layout::lock_asset_library(&config.hls_cache_dir)?;
     let baidu = BaiduCloud::from_env().await?;
     if let Some(cloud) = &baidu {
         info!("百度网盘直连已启用：根目录={}", cloud.root_path());

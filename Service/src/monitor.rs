@@ -1,4 +1,4 @@
-use std::{sync::Arc, time::Duration};
+use std::{path::Path, sync::Arc, time::Duration};
 
 use notify::{
     Config as NotifyConfig, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher,
@@ -55,6 +55,7 @@ fn spawn_event_monitor(
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
         let media_dir = scanner.media_dir().to_path_buf();
+        let hls_dir = scanner.hls_cache_dir().to_path_buf();
         let (event_tx, mut event_rx) = mpsc::unbounded_channel::<WatchMessage>();
         let callback_tx = event_tx.clone();
         let watcher_result = RecommendedWatcher::new(
@@ -75,14 +76,16 @@ fn spawn_event_monitor(
             }
         };
 
-        if let Err(error) = watcher.watch(&media_dir, RecursiveMode::Recursive) {
-            error!(
-                "监听媒体目录失败，将依赖周期扫描：{}（{error}）",
-                media_dir.display()
-            );
-            return;
+        for directory in [&media_dir, &hls_dir] {
+            if let Err(error) = watcher.watch(directory, RecursiveMode::Recursive) {
+                error!(
+                    "监听资源目录失败，将依赖周期扫描：{}（{error}）",
+                    directory.display()
+                );
+            } else {
+                info!("已监听资源目录变化：{}", directory.display());
+            }
         }
-        info!("已监听媒体目录变化：{}", media_dir.display());
 
         loop {
             let first_message = tokio::select! {
@@ -98,7 +101,7 @@ fn spawn_event_monitor(
             let Some(message) = first_message else {
                 break;
             };
-            if !handle_message(message) {
+            if !handle_message(message, &media_dir, &hls_dir) {
                 continue;
             }
 
@@ -116,7 +119,7 @@ fn spawn_event_monitor(
                     message = event_rx.recv() => {
                         match message {
                             Some(message) => {
-                                if handle_message(message) {
+                                if handle_message(message, &media_dir, &hls_dir) {
                                 deadline = Instant::now() + debounce;
                                 }
                             }
@@ -173,12 +176,148 @@ fn spawn_periodic_scan(
     })
 }
 
-fn handle_message(message: WatchMessage) -> bool {
+fn handle_message(message: WatchMessage, media_dir: &Path, hls_dir: &Path) -> bool {
     match message {
-        WatchMessage::Event(event) => !matches!(event.kind, EventKind::Access(_)),
+        WatchMessage::Event(event) => should_rescan(&event, media_dir, hls_dir),
         WatchMessage::Error(error) => {
             warn!("媒体目录监听发生错误，将等待后续事件或周期扫描：{error}");
             false
         }
+    }
+}
+
+fn should_rescan(event: &Event, media_dir: &Path, hls_dir: &Path) -> bool {
+    if matches!(event.kind, EventKind::Access(_)) {
+        return false;
+    }
+    event.paths.iter().any(|path| {
+        if path.starts_with(media_dir) {
+            return true;
+        }
+        let Ok(relative) = path.strip_prefix(hls_dir) else {
+            return false;
+        };
+        if relative
+            .components()
+            .any(|part| part.as_os_str().to_string_lossy().starts_with('.'))
+        {
+            return false;
+        }
+        // 临时目录及分片写入不刷新目录；正式发布重命名、分类增删和元数据更新才刷新。
+        path.file_name()
+            .is_some_and(|name| name == crate::discovery::PUBLISHED_ASSET_FILE)
+            || matches!(
+                event.kind,
+                EventKind::Create(_)
+                    | EventKind::Remove(_)
+                    | EventKind::Modify(notify::event::ModifyKind::Name(_))
+                    | EventKind::Any
+                    | EventKind::Other
+            )
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use notify::event::{CreateKind, DataChange, ModifyKind, RemoveKind};
+    use std::fs;
+
+    #[test]
+    fn 分类删除与正式发布触发刷新而临时分片不触发() {
+        let media = Path::new("media");
+        let hls = Path::new("hls");
+        let check = |kind, path| should_rescan(&Event::new(kind).add_path(path), media, hls);
+        assert!(check(
+            EventKind::Remove(RemoveKind::Folder),
+            hls.join("课程")
+        ));
+        assert!(check(
+            EventKind::Create(CreateKind::Folder),
+            hls.join("课程/id/version")
+        ));
+        assert!(!check(
+            EventKind::Create(CreateKind::File),
+            hls.join("课程/id/.version.tmp/seg_00000.m4s")
+        ));
+        assert!(!check(
+            EventKind::Modify(ModifyKind::Data(DataChange::Any)),
+            hls.join("课程/id/version/seg_00000.m4s")
+        ));
+        assert!(check(
+            EventKind::Modify(ModifyKind::Data(DataChange::Any)),
+            hls.join("课程/id/version/asset.json")
+        ));
+        assert!(check(
+            EventKind::Create(CreateKind::File),
+            media.join("课程/视频.mp4")
+        ));
+    }
+
+    #[tokio::test]
+    async fn 关闭周期扫描后移走分类仍通过文件事件更新目录() {
+        let temporary = tempfile::tempdir().unwrap();
+        let media = temporary.path().join("media");
+        let hls_root = temporary.path().join("hls");
+        let covers = temporary.path().join("covers");
+        fs::create_dir_all(&media).unwrap();
+        fs::create_dir_all(&covers).unwrap();
+        let default_cover = temporary.path().join("default.png");
+        fs::write(&default_cover, "测试封面").unwrap();
+        let old = crate::hls_migration::tests::create_legacy(&hls_root, "课程/第一集.mp4");
+        let target = crate::asset_layout::grouped_video_dir(
+            &hls_root,
+            "课程",
+            &crate::discovery::stable_id("课程/第一集.mp4"),
+        )
+        .unwrap();
+        fs::create_dir_all(target.parent().unwrap()).unwrap();
+        fs::rename(old.parent().unwrap(), &target).unwrap();
+        let scanner = MediaScanner::new(
+            media,
+            hls_root.clone(),
+            crate::cover::CoverResolver::new(
+                covers,
+                default_cover,
+                Arc::new(crate::cover::FfmpegCoverGenerator::new(
+                    "不存在的转码器".into(),
+                    0,
+                )),
+            ),
+        );
+        let store = CatalogStore::new(scanner.scan().unwrap().catalog);
+        assert_eq!(store.snapshot().await.len(), 1);
+        let (stop_tx, stop_rx) = watch::channel(false);
+        let (manager, worker) = HlsManager::start(
+            hls_root.clone(),
+            "不存在的转码器".into(),
+            0,
+            stop_rx.clone(),
+        )
+        .unwrap();
+        let handles = start_media_monitors(
+            scanner,
+            store.clone(),
+            manager,
+            Duration::from_millis(30),
+            None,
+            Arc::new(Mutex::new(())),
+            stop_rx,
+        );
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        fs::rename(hls_root.join("课程"), temporary.path().join("下架备份")).unwrap();
+        let outcome = tokio::time::timeout(Duration::from_secs(5), async {
+            while store.snapshot().await.len() != 0 {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await;
+        stop_tx.send(true).unwrap();
+        for handle in handles {
+            handle.await.unwrap();
+        }
+        worker.await.unwrap();
+        assert!(outcome.is_ok(), "文件事件应在未启用周期扫描时更新目录");
+        assert!(temporary.path().join("下架备份").exists());
     }
 }
